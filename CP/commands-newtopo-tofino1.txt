@@ -1,0 +1,130 @@
+pd-dptp-topo
+pd mac_forward set_default_action nop
+pd acl set_default_action nop
+pd copy_dptp_packet set_default_action nop
+pd timesync_delta set_default_action timesync_calculate_egdelta
+pd qos set_default_action nop
+pd timesyncs2s_store_reference_hi set_default_action timesyncs2s_capture_reference_hi
+pd timesyncs2s_store_reference_lo set_default_action timesyncs2s_capture_reference_lo
+pd timesyncs2s_store_elapsed_lo set_default_action timesyncs2s_capture_elapsed_lo
+pd timesyncs2s_store_igTs_hi set_default_action timesyncs2s_capture_igTs_hi action_switch_id 20
+pd timesyncs2s_store_igTs_lo set_default_action timesyncs2s_capture_igTs_lo action_switch_id 20
+pd timesyncs2s_store_macTs_lo set_default_action timesyncs2s_capture_macTs_lo
+pd timesyncs2s_inform_cp set_default_action nop
+pd timesyncs2s_inform_cp_diff set_default_action nop
+pd timesyncs2s_store_capture_tx set_default_action nop
+pd flip_address set_default_action nop
+pd timesync_now set_default_action timesync_request
+pd timesync_hi_now set_default_action timesync_hi_request
+
+
+pd dptp_add_elapsed_hi set_default_action do_dptp_add_elapsed_hi
+pd dptp_add_elapsed_lo set_default_action do_dptp_add_elapsed_lo
+pd dptp_calc_residue set_default_action do_dptp_calc_residue
+pd dptp_compare_residue set_default_action do_dptp_compare_residue
+pd dptp_compare_igts set_default_action do_dptp_compare_igts
+pd dptp_handle_overflow set_default_action do_dptp_handle_overflow
+pd dptp_handle_overflow add_entry nop mdata_dptp_compare_residue 0
+pd dptp_store_now_hi set_default_action do_dptp_store_now_hi
+pd dptp_store_now_lo set_default_action do_dptp_store_now_lo
+
+pd timesync_capture_ts set_default_action nop
+pd timesync_capture_ts add_entry timesync_capture_tx mdata_command 0x12
+pd timesync_capture_ts add_entry timesync_capture_tx mdata_command 0x11
+pd timesync_capture_ts add_entry timesync_capture_tx mdata_command 0x2
+
+
+pd mac_forward add_entry set_egr ethernet_dstAddr 0x3cfdfead84a4 action_egress_spec 130
+pd mac_forward add_entry set_egr ethernet_dstAddr 0x3cfdfead84a5 action_egress_spec 131
+
+pd mac_forward add_entry set_egr ethernet_dstAddr 0x6cb3115309b2 action_egress_spec 147
+
+pd mac_forward add_entry set_egr ethernet_dstAddr 0xa0000010000a action_egress_spec 160
+pd mac_forward add_entry set_egr ethernet_dstAddr 0x100000000001 action_egress_spec 176
+
+
+
+pd acl add_entry _drop ig_intr_md_ingress_port 176 ethernet_dstAddr 0xa0000010000a ethernet_etherType 0x1234
+pd acl add_entry _drop ig_intr_md_ingress_port 160 ethernet_dstAddr 0x100000000001 ethernet_etherType 0x1234
+pd acl add_entry _drop ig_intr_md_ingress_port 176 ethernet_dstAddr 0xa0000010000a ethernet_etherType 0x800
+pd acl add_entry _drop ig_intr_md_ingress_port 160 ethernet_dstAddr 0x100000000001 ethernet_etherType 0x800
+
+pd classify_logical_switch  add_entry classify_switch ethernet_dstAddr 0xa0000010000a action_switch_id 0x0
+pd classify_logical_switch  add_entry classify_switch ethernet_dstAddr 0x100000000001 action_switch_id 0x1
+
+pd classify_src_logical_switch  add_entry classify_src_switch ethernet_srcAddr 0xa0000010000a action_switch_id 0x0
+pd classify_src_logical_switch  add_entry classify_src_switch ethernet_srcAddr 0x100000000001 action_switch_id 0x1
+
+pd calc_current_utilization add_entry do_calc_current_utilization ig_intr_md_ingress_port 0x80 action_link 0x80
+pd calc_current_utilization add_entry do_calc_current_utilization ig_intr_md_ingress_port 0x81 action_link 0x81
+pd calc_current_utilization add_entry do_calc_current_utilization ig_intr_md_ingress_port 0x82 action_link 0x82
+pd calc_current_utilization add_entry do_calc_current_utilization ig_intr_md_ingress_port 0x83 action_link 0x83
+
+pd timesyncs2s_gen_request add_entry timesyncs2s_request mdata_switch_id 0
+pd timesyncs2s_gen_request add_entry timesyncs2s_request mdata_switch_id 1
+pd timesyncs2s_gen_request add_entry timesyncs2s_request mdata_switch_id 2
+pd timesyncs2s_gen_request add_entry timesyncs2s_request mdata_switch_id 3
+pd timesyncs2s_gen_request add_entry timesyncs2s_request mdata_switch_id 4
+pd timesyncs2s_gen_request add_entry timesyncs2s_request mdata_switch_id 5
+pd timesyncs2s_gen_request add_entry timesyncs2s_request mdata_switch_id 6
+
+pd timesyncs2s_gen_response add_entry timesyncs2s_response mdata_switch_id 0
+pd timesyncs2s_gen_response add_entry timesyncs2s_response mdata_switch_id 1
+pd timesyncs2s_gen_response add_entry timesyncs2s_response mdata_switch_id 2
+pd timesyncs2s_gen_response add_entry timesyncs2s_response mdata_switch_id 3
+pd timesyncs2s_gen_response add_entry timesyncs2s_response mdata_switch_id 4
+pd timesyncs2s_gen_response add_entry timesyncs2s_response mdata_switch_id 5
+pd timesyncs2s_gen_response add_entry timesyncs2s_response mdata_switch_id 6
+
+pd timesync_inform_cp add_entry timesync_flag_cp_learn mdata_command 0x2
+pd timesync_inform_cp add_entry timesync_flag_cp_learn mdata_command 0x12
+pd copy_dptp_packet add_entry dptp_packet mdata_command 0x2
+pd copy_dptp_packet add_entry dptp_packet mdata_command 0x12
+pd flip_address add_entry reverse_packet mdata_command 0x2
+pd flip_address add_entry reverse_packet mdata_command 0x12
+pd qos add_entry do_qos mdata_command 0x2
+pd qos add_entry do_qos mdata_command 0x6
+pd qos add_entry do_qos mdata_command 0x12
+pd timesyncs2s_store_capture_tx add_entry do_timesyncs2s_capture_tx_set mdata_switch_id 0x1
+pd timesyncs2s_store_capture_tx add_entry do_timesyncs2s_capture_tx_set mdata_switch_id 0x2
+pd timesyncs2s_store_capture_tx add_entry do_timesyncs2s_capture_tx_set mdata_switch_id 0x3
+pd timesyncs2s_store_capture_tx add_entry do_timesyncs2s_capture_tx_set mdata_switch_id 0x4
+pd timesyncs2s_store_capture_tx add_entry do_timesyncs2s_capture_tx_set mdata_switch_id 0x5
+pd timesyncs2s_store_capture_tx add_entry do_timesyncs2s_capture_tx_set mdata_switch_id 0x6
+
+pd timesyncs2s_inform_cp_diff add_entry timesyncs2s_flag_cp mdata_switch_id 0x1
+pd timesyncs2s_inform_cp_diff add_entry timesyncs2s_flag_cp mdata_switch_id 0x2
+pd timesyncs2s_inform_cp_diff add_entry timesyncs2s_flag_cp mdata_switch_id 0x3
+pd timesyncs2s_inform_cp_diff add_entry timesyncs2s_flag_cp mdata_switch_id 0x4
+pd timesyncs2s_inform_cp_diff add_entry timesyncs2s_flag_cp mdata_switch_id 0x5
+pd timesyncs2s_inform_cp_diff add_entry timesyncs2s_flag_cp mdata_switch_id 0x6
+
+
+pd timesyncs2s_inform_cp add_entry timesyncs2s_flag_cp mdata_switch_id 0x1
+pd timesyncs2s_inform_cp add_entry timesyncs2s_flag_cp mdata_switch_id 0x2
+pd timesyncs2s_inform_cp add_entry timesyncs2s_flag_cp mdata_switch_id 0x3
+pd timesyncs2s_inform_cp add_entry timesyncs2s_flag_cp mdata_switch_id 0x4
+pd timesyncs2s_inform_cp add_entry timesyncs2s_flag_cp mdata_switch_id 0x5
+pd timesyncs2s_inform_cp add_entry timesyncs2s_flag_cp mdata_switch_id 0x6
+
+pd timesyncs2s_store_igTs_hi add_entry timesyncs2s_capture_igTs_hi mdata_command 0x13 mdata_switch_id 0x1 action_switch_id 0x1
+pd timesyncs2s_store_igTs_lo add_entry timesyncs2s_capture_igTs_lo mdata_command 0x13 mdata_switch_id 0x1 action_switch_id 0x1
+
+end
+ucli
+pm
+port-add 1/- 10G NONE
+an-set 1/- 2
+port-enb 1/-
+port-add 3/- 10G NONE
+an-set 3/- 1
+port-enb 3/-
+port-add 5/- 10G NONE
+port-enb 5/-
+port-add 7/- 10G NONE
+port-enb 7/-
+port-add 32/- 10G NONE
+an-set 32/- 2
+port-enb 32/-
+exit
+exit
