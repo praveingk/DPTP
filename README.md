@@ -2,8 +2,9 @@
 Data-Plane Time synchronization Protocol
 
 # Topology 
-
-
+The Topology used in as below : 
+![DPTP Topology](Tofino-minibed-timesync.png)
+A single tofino switch named "tofino1" is virtualized into two switches Master(M) and Switch1. To do this virtualization, you will need to add a loopback link between port3 (160-163) and port5 (176-179). Once done, it will be configured as 10G ports, and we will be using only one link (160-176) as the connection between Switch1 and Master. Additionally, you will need atleast one host connected to port 1(128-131) to send DPTP requests.
 ### Steps to run DPTP in Tofino:
 
 1) Navigate to the SDE PATH :
@@ -26,7 +27,8 @@ Data-Plane Time synchronization Protocol
 
 ### Steps to run MoonGen:
 Moongen script sends synchronization requests packets between switches
-
+Pull from https://github.com/praveingk/moongen/, Make sure the submodule libmoon is also pulled. 
+Follow the readme instructions in moongen to build it.
 1) Enable the NIC to work with DPDK:
 ```shell
 sudo ./libmoon/deps/dpdk/usertools/dpdk-devbind.py --b igb_uio <NIC Port>
