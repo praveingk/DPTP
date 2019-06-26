@@ -41,7 +41,7 @@ sudo ./libmoon/deps/dpdk/usertools/dpdk-devbind.py --b igb_uio <NIC Port>
  sudo ./build/MoonGen examples/dptp_topo.lua <DPDK PORT id1> <DPDK Port id2>
 ```
 
-Note that <DPDK Port id2> is redundant and is used only for switch-to-host DPTP. 
+Note that "DPDK Port id2" is redundant and is used only for switch-to-host DPTP. 
 For just switch-to-switch DPTP, the command could be :
 ```shell
  sudo ./build/MoonGen examples/dptp_topo.lua 0 0
