@@ -33,10 +33,11 @@
 #include <tofino/pdfixed/pd_conn_mgr.h>
 
 #define THRIFT_PORT_NUM 7777
-#define P4SYNC_CAPTURE_COMMAND 0x6
+#define DPTP_GEN_REQ 0x11
+#define DPTP_CAPTURE_COMMAND 0x6
 
 p4_pd_sess_hdl_t sess_hdl;
-typedef struct __attribute__((__packed__)) p4sync_t {
+typedef struct __attribute__((__packed__)) dptp_t {
   uint8_t dstAddr[6];
   uint8_t srcAddr[6];
   uint16_t type;
@@ -49,14 +50,22 @@ typedef struct __attribute__((__packed__)) p4sync_t {
 	uint8_t igMacTs[6];
 	uint8_t igTs[6];
 	uint8_t egTs[6];
-} p4sync;
+} dptp;
 
 pcap_t *ppcap;
-p4sync p4sync_pkt;
+dptp dptp_pkt;
 uint8_t *pkt;
+
+// DPTP Followup
+dptp dptp_followup_pkt;
 uint8_t *upkt;
-size_t sz = sizeof(p4sync);
+size_t sz = sizeof(dptp);
 bf_pkt *bfpkt = NULL;
+// DPTP Request
+dptp dptp_request_pkt;
+uint8_t *dreqpkt;
+size_t dptp_sz = sizeof(dptp);
+bf_pkt *bfdptppkt = NULL;
 
 bf_pkt_tx_ring_t tx_ring = BF_PKT_TX_RING_0;
 int switchid = 0;
@@ -203,7 +212,7 @@ void *monitor_timesynctopo_64(void *args) {
 		int replyQueing = s2s_egts_lo[i] - s2s_elapsed_lo[i];
 		int respmacdelay = now_igts_lo[i] - now_macts_lo[i];
 		int reqDelay =  capture_req_ts - s2s_reqigts_lo[i];
-    printf("capture_resp_ts = %u\n", capture_resp_ts);
+    //printf("capture_resp_ts = %u\n", capture_resp_ts);
 		int respDelay = capture_resp_ts - s2s_elapsed_lo[i]; //s2s_egts;
 
 		int latency_ig = now_igts_lo[i] - s2s_reqigts_lo[i];
@@ -239,8 +248,8 @@ void *monitor_timesynctopo_64(void *args) {
     }
 
 		// printf("elapsed_lo = %u\n", elapsed_lo);
-    printf("s2s_elapsed_hi = %u, s2s_elapsed_lo= %u\n",
-      s2s_elapsed_hi[i], s2s_elapsed_lo[i]);
+    // printf("s2s_elapsed_hi = %u, s2s_elapsed_lo= %u\n",
+    //  s2s_elapsed_hi[i], s2s_elapsed_lo[i]);
 
 		cp_flag[0] = 0;
 		cp_flag[1] = 0;
@@ -274,13 +283,14 @@ void *monitor_timesynctopo_64(void *args) {
     printf("Total RTT                         = %d ns\n", latency_tx);
     printf("-------------------------------------------------\n");
 
-		printf("Switchid=%d\n", switch_id);
+		//printf("Switchid=%d\n", switch_id);
 		if (switch_id == 1) {
       printf("calc_time_hi(Master) = %u s, calc_time_lo(Master) = %u ns\n", orig_time_hi, orig_time_lo);
       printf("calc_time_hi(DPTP)   = %u s, calc_time_lo(DPTP)   = %u ns\n", calc_time_hi_dptp, calc_time_lo_dptp);
+      printf("Error in Synchronization (ns) = %d s\n", calc_time_lo_dptp - orig_time_lo);
       printf("-------------------------------------------------\n");
-      fprintf(fc_s5m,"%d, %d\n", s1log, calc_time_lo_dptp - orig_time_lo);
-			fflush(fc_s5m);
+      fprintf(fc_s1m,"%d, %d\n", s1log, calc_time_lo_dptp - orig_time_lo);
+			fflush(fc_s1m);
       s1log++;
 		}
 	}
@@ -290,9 +300,9 @@ void *monitor_timesynctopo_64(void *args) {
 
 FILE *fp;
 void send_bf_followup_packet(uint8_t *dstAddr, uint32_t capture_tx) {
-	memcpy(p4sync_pkt.dstAddr, dstAddr, 6);//{0x3c, 0xfd,0xfe, 0xb7, 0xe7, 0xf4}
-	p4sync_pkt.reference_ts_hi = htonl(capture_tx);
-  memcpy(upkt, &p4sync_pkt, sz);
+	memcpy(dptp_pkt.dstAddr, dstAddr, 6);//{0x3c, 0xfd,0xfe, 0xb7, 0xe7, 0xf4}
+	dptp_pkt.reference_ts_hi = htonl(capture_tx);
+  memcpy(upkt, &dptp_pkt, sz);
   if (bf_pkt_data_copy(bfpkt, upkt, sz) != 0) {
     printf("Failed data copy\n");
   }
@@ -303,6 +313,18 @@ void send_bf_followup_packet(uint8_t *dstAddr, uint32_t capture_tx) {
     printf("Packet sent successfully capture_tx=%x\n", htonl(capture_tx));
   }
 }
+
+void* send_dptp_requests(void *args) {
+  while (1) {
+    printf("Sending DPTP Packets Out..\n");
+    bf_status_t stat = bf_pkt_tx(0, bfdptppkt, tx_ring, (void *)bfdptppkt);
+    if (stat  != BF_SUCCESS) {
+      printf("Failed to send packet status=%s\n", bf_err_str(stat));
+    }
+    sleep(1);
+  }
+}
+
 
 /* Handle digests for DPTP requests and sends a follow-up
    packet after reading the Tx timestamp from port.*/
@@ -458,8 +480,33 @@ void switch_pktdriver_callback_register(bf_dev_id_t device) {
   }
 }
 
+// Custom MAC address defined for switches
+uint8_t switch1[] = {0x10, 0x00, 0x00, 0x00, 0x00, 0x01};
+uint8_t  master[] = {0xa0, 0x00, 0x00, 0x10, 0x00, 0x0a};
 
-void bfpkt_init() {
+void dptp_requestpkt_init() {
+  int i=0;
+  int cookie;
+  if (bf_pkt_alloc(0, &bfdptppkt, dptp_sz, BF_DMA_CPU_PKT_TRANSMIT_0) != 0) {
+    printf("Failed bf_pkt_alloc\n");
+  }
+
+  memcpy(dptp_request_pkt.dstAddr, master, 6);
+  memcpy(dptp_request_pkt.srcAddr, switch1, 6);
+  dptp_request_pkt.type = htons(0x88f7);
+  dptp_request_pkt.magic = htons(0x0002);
+  dptp_request_pkt.command = DPTP_GEN_REQ;
+  dreqpkt = (uint8_t *) malloc(dptp_sz);
+  memcpy(dreqpkt, &dptp_request_pkt, dptp_sz);
+  if (bf_pkt_is_inited(0)) {
+    printf("DPTP Request Packet is initialized\n");
+  }
+  if (bf_pkt_data_copy(bfdptppkt, dreqpkt, dptp_sz) != 0) {
+    printf("Failed data copy\n");
+  }
+}
+
+void dptp_followuppkt_init() {
   int i=0;
   int cookie;
   if (bf_pkt_alloc(0, &bfpkt, sz, BF_DMA_CPU_PKT_TRANSMIT_0) != 0) {
@@ -468,14 +515,14 @@ void bfpkt_init() {
 
   uint8_t dstAddr[] = {0x3c, 0xfd, 0xfe, 0xad, 0x82, 0xe0};//{0x3c, 0xfd,0xfe, 0xb7, 0xe7, 0xf4};// {0xf4, 0xe7, 0xb7, 0xfe, 0xfd, 0x3c};
   uint8_t srcAddr[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x11};
-  memcpy(p4sync_pkt.dstAddr, dstAddr, 6);//{0x3c, 0xfd,0xfe, 0xb7, 0xe7, 0xf4}
-  memcpy(p4sync_pkt.srcAddr, srcAddr, 6);//{0x3c, 0xfd,0xfe, 0xb7, 0xe7, 0xf4}
-  p4sync_pkt.type = htons(0x88f7);
-  p4sync_pkt.magic = htons(0x0002);
-  p4sync_pkt.command = P4SYNC_CAPTURE_COMMAND;
+  memcpy(dptp_pkt.dstAddr, dstAddr, 6);//{0x3c, 0xfd,0xfe, 0xb7, 0xe7, 0xf4}
+  memcpy(dptp_pkt.srcAddr, srcAddr, 6);//{0x3c, 0xfd,0xfe, 0xb7, 0xe7, 0xf4}
+  dptp_pkt.type = htons(0x88f7);
+  dptp_pkt.magic = htons(0x0002);
+  dptp_pkt.command = DPTP_CAPTURE_COMMAND;
 
   upkt = (uint8_t *) malloc(sz);
-  memcpy(upkt, &p4sync_pkt, sz);
+  memcpy(upkt, &dptp_pkt, sz);
 
   if (bf_pkt_is_inited(0)) {
     printf("bf_pkt is initialized\n");
@@ -541,11 +588,11 @@ int main (int argc, char **argv) {
 	init_bf_switchd();
   getSwitchName();
 	init_tables();
-	init_ports();
 	pthread_t era_thread;
-	pthread_t timesync_test_thread;
 	pthread_t timesyncs2s_thread;
 	pthread_t capturets_thread;
+  pthread_t dptp_thread;
+
 	printf("Starting dptp_topo Control Plane Unit ..\n");
 
 	// Thread to monitor the Global Timestamp for wrap over, and increment Era
@@ -554,11 +601,14 @@ int main (int argc, char **argv) {
 	pthread_create(&timesyncs2s_thread, NULL, monitor_timesynctopo_64, NULL);
 
 	switch_pktdriver_callback_register(0);
-  bfpkt_init();
+  dptp_requestpkt_init();
+  dptp_followuppkt_init();
   lpf_init();
 
 	register_learn();
 	snapshot_reference();
+  // Thread to send out regular DPTP requests from SWITCH1 to MASTER
+  pthread_create(&dptp_thread, NULL, send_dptp_requests, NULL);
 
 	// Hope this never hits. Wait indefinitely for threads to finish.
 	pthread_join(era_thread, NULL);
