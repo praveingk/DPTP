@@ -26,8 +26,9 @@ A single tofino switch named "tofino1" is virtualized into two switches Master(M
      "cd ../<YOUR PATH>/CP"
      "./run.sh"
 ```
+5) This should automatically start the synchronization between Switch1 and master through packets from control-plane.
 
-### Steps to run MoonGen:
+### Steps to run MoonGen for host synchronization:
 Moongen script sends synchronization requests packets between switches
 Pull from https://github.com/praveingk/moongen/, Make sure the submodule libmoon is also pulled. 
 Follow the readme instructions in moongen to build it.
