@@ -44,8 +44,6 @@ pd mac_forward add_entry set_egr ethernet_dstAddr 0x100000000001 action_egress_s
 
 
 
-pd acl add_entry _drop ig_intr_md_ingress_port 176 ethernet_dstAddr 0xa0000010000a ethernet_etherType 0x1234
-pd acl add_entry _drop ig_intr_md_ingress_port 160 ethernet_dstAddr 0x100000000001 ethernet_etherType 0x1234
 pd acl add_entry _drop ig_intr_md_ingress_port 176 ethernet_dstAddr 0xa0000010000a ethernet_etherType 0x800
 pd acl add_entry _drop ig_intr_md_ingress_port 160 ethernet_dstAddr 0x100000000001 ethernet_etherType 0x800
 

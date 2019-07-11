@@ -116,9 +116,11 @@ uint32_t max_ns = 1000000000;
 
 void *monitor_timesynctopo_64(void *args) {
 	FILE *fc_s1m = fopen("logs/dptp_s1m.log", "w");
+  FILE *fd = fopen("logs/dptp_measurement.log", "w");
+  fprintf(fd, "reqMacDelay, replyQueing, respTxDelay, dpTxDelay, undpTxDelay, respWireDelay, respMacDelay, latency\n");
   struct timespec tsp;
   tsp.tv_sec = 0;
-  tsp.tv_nsec = 1000;
+  tsp.tv_nsec = 500000;
 
 	int count = 2;
 	uint32_t cp_flag[count];
@@ -138,6 +140,8 @@ void *monitor_timesynctopo_64(void *args) {
 	uint32_t s2s_macts_lo[count];
 	uint16_t s2s_egts_hi[count];
 	uint32_t s2s_egts_lo[count];
+  uint16_t s2s_updts_hi[count];
+  uint32_t s2s_updts_lo[count];
 	uint32_t reference_hi[count], reference_lo[count];
 	uint16_t now_igts_hi[count];
 	uint32_t now_igts_lo[count];
@@ -148,7 +152,6 @@ void *monitor_timesynctopo_64(void *args) {
   uint32_t capture_resp_tx[count];
   uint32_t reqDelayV[count];
 	bf_dev_port_t reqport = 160;
-	bf_dev_port_t respport = 176;
 	uint64_t capture_req_ts;
 	uint64_t capture_resp_ts;
 	bool ts_valid1, ts_valid2;
@@ -170,9 +173,8 @@ void *monitor_timesynctopo_64(void *args) {
     bf_ts_global_baresync_ts_get((bf_dev_id_t) 0, &global_ts_ns_bef, &baresync_ts_ns);
 
 		switch(cp_flag[i]) {
-			case 1:
+			case 1: // Switch 1
 				reqport = 160; // Tofino1
-				respport = 176;
 				break;
       default:
         printf("Unexpected Case!\n");
@@ -184,13 +186,22 @@ void *monitor_timesynctopo_64(void *args) {
 
 		printf("======================Reply Received on Switch(%d)=========================\n", switch_id);
 		// Below are for calculated timestamp
+    // T_Now from master
 		p4_pd_dptp_topo_register_read_timesyncs2s_reference_hi(sess_hdl, p4_dev_tgt, switch_id, REGISTER_READ_HW_SYNC, s2s_reference_hi, &count);
 		p4_pd_dptp_topo_register_read_timesyncs2s_reference_lo(sess_hdl, p4_dev_tgt, switch_id, REGISTER_READ_HW_SYNC, s2s_reference_lo, &count);
+    // Request Received Mac Timestamp from master
+    p4_pd_dptp_topo_register_read_timesyncs2s_macts_lo(sess_hdl, p4_dev_tgt, switch_id, REGISTER_READ_HW_SYNC, s2s_macts_lo, &count);
+    // Ingress Timestamp from master
 		p4_pd_dptp_topo_register_read_timesyncs2s_elapsed_lo(sess_hdl, p4_dev_tgt, switch_id, REGISTER_READ_HW_SYNC, s2s_elapsed_lo, &count);
-		p4_pd_dptp_topo_register_read_timesyncs2s_macts_lo(sess_hdl, p4_dev_tgt, switch_id, REGISTER_READ_HW_SYNC, s2s_macts_lo, &count);
+    // Egress Timestamp from master
 		p4_pd_dptp_topo_register_read_timesyncs2s_egts_lo(sess_hdl, p4_dev_tgt, switch_id, REGISTER_READ_HW_SYNC, s2s_egts_lo, &count);
+    // Update Delay Tx from Master (Data plane)
+    p4_pd_dptp_topo_register_read_timesyncs2s_updts_lo(sess_hdl, p4_dev_tgt, switch_id, REGISTER_READ_HW_SYNC, s2s_updts_lo, &count);
+    // Port Tx Timestamp from Master via Follow up
     p4_pd_dptp_topo_register_read_timesyncs2s_capture_tx(sess_hdl, p4_dev_tgt, switch_id, REGISTER_READ_HW_SYNC, capture_resp_tx, &count);
+    // Response Received Mac Timestamp at Switch1
 		p4_pd_dptp_topo_register_read_timesyncs2s_now_macts_lo(sess_hdl, p4_dev_tgt, switch_id, REGISTER_READ_HW_SYNC, now_macts_lo, &count);
+    // Ingress Timestamp at Switch1
 		p4_pd_dptp_topo_register_read_timesyncs2s_igts_hi(sess_hdl, p4_dev_tgt, switch_id, REGISTER_READ_HW_SYNC, now_igts_hi, &count);
 		p4_pd_dptp_topo_register_read_timesyncs2s_igts_lo(sess_hdl, p4_dev_tgt, switch_id, REGISTER_READ_HW_SYNC, now_igts_lo, &count);
 
@@ -212,12 +223,16 @@ void *monitor_timesynctopo_64(void *args) {
 		int replyQueing = s2s_egts_lo[i] - s2s_elapsed_lo[i];
 		int respmacdelay = now_igts_lo[i] - now_macts_lo[i];
 		int reqDelay =  capture_req_ts - s2s_reqigts_lo[i];
-    //printf("capture_resp_ts = %u\n", capture_resp_ts);
-		int respDelay = capture_resp_ts - s2s_elapsed_lo[i]; //s2s_egts;
-
+    printf("capture_resp_ts = %u\n", capture_resp_ts);
+		int respDelay = capture_resp_ts - s2s_elapsed_lo[i];
+    int respTxDelay = capture_resp_ts - s2s_egts_lo[i];
+    int dpTxDelay = s2s_updts_lo[i] - s2s_egts_lo[i];
+    int undpTxDelay = respTxDelay - dpTxDelay;
 		int latency_ig = now_igts_lo[i] - s2s_reqigts_lo[i];
     int latency_tx = now_macts_lo[i] - capture_req_ts;
-    int respD = (latency_ig - ReqMacDelay - reqDelay - respDelay - respmacdelay)/2 + respDelay + respmacdelay;
+    int reqWireDelay = s2s_macts_lo[i] - capture_req_ts;
+    int respWireDelay = now_macts_lo[i] - capture_resp_ts;
+    //int respD = (latency_ig - ReqMacDelay - reqDelay - respDelay - respmacdelay)/2 + respDelay + respmacdelay;
     int respD_opt = (latency_tx - ReqMacDelay - respDelay)/2 + respDelay + respmacdelay;
 
     uint32_t calc_time_hi_dptp = s2s_reference_hi_r  + (respD_opt / max_ns);
@@ -247,10 +262,6 @@ void *monitor_timesynctopo_64(void *args) {
       orig_time_hi += 1;
     }
 
-		// printf("elapsed_lo = %u\n", elapsed_lo);
-    // printf("s2s_elapsed_hi = %u, s2s_elapsed_lo= %u\n",
-    //  s2s_elapsed_hi[i], s2s_elapsed_lo[i]);
-
 		cp_flag[0] = 0;
 		cp_flag[1] = 0;
 
@@ -276,26 +287,34 @@ void *monitor_timesynctopo_64(void *args) {
     printf("-------------------------------------------------\n");
     printf("                     Switch %d             \n", switch_id);
     printf("-------------------------------------------------\n");
-    printf("Reply mac delay                   = %d ns\n", ReqMacDelay);
+    printf("Request Wire Delay                = %d ns\n", reqWireDelay);
+    printf("Reply Mac Delay                   = %d ns\n", ReqMacDelay);
     printf("Reply Queing                      = %d ns\n", replyQueing);
-    printf("Reply Egress Tx Delay             = %d ns\n", respDelay);
-    printf("Reply mac delay                   = %d ns\n", respmacdelay);
-    printf("Total RTT                         = %d ns\n", latency_tx);
+    printf("Reply Egress Tx Delay             = %d ns\n", respTxDelay);
+    printf("Reply Dataplane Tx Delay          = %d ns\n", dpTxDelay);
+    printf("Unaccounted Dataplane Tx Delay    = %d ns\n", undpTxDelay);
+    printf("Response Wire Delay               = %d ns\n", respWireDelay);
+    printf("Response Mac Delay                = %d ns\n", respmacdelay);
+    printf("Total RTT (RespRx - ReqTx)        = %d ns\n", latency_tx);
     printf("-------------------------------------------------\n");
 
 		//printf("Switchid=%d\n", switch_id);
 		if (switch_id == 1) {
-      printf("calc_time_hi(Master) = %u s, calc_time_lo(Master) = %u ns\n", orig_time_hi, orig_time_lo);
-      printf("calc_time_hi(DPTP)   = %u s, calc_time_lo(DPTP)   = %u ns\n", calc_time_hi_dptp, calc_time_lo_dptp);
-      printf("Error in Synchronization (ns) = %d s\n", calc_time_lo_dptp - orig_time_lo);
+      printf("calc_time_hi(Ground Truth) = %u s, calc_time_lo(Ground Truth) = %u ns\n", orig_time_hi, orig_time_lo);
+      printf("calc_time_hi(DPTP)         = %u s, calc_time_lo(DPTP)         = %u ns\n", calc_time_hi_dptp, calc_time_lo_dptp);
+      printf("-------------------------------------------------\n");
+      printf("Error in Synchronization   = %d ns\n", calc_time_lo_dptp - orig_time_lo);
       printf("-------------------------------------------------\n");
       fprintf(fc_s1m,"%d, %d\n", s1log, calc_time_lo_dptp - orig_time_lo);
+      fprintf(fd, "%d, %d, %d, %d, %d, %d, %d, %d, %d\n", reqWireDelay,
+       ReqMacDelay, replyQueing, respTxDelay, dpTxDelay,undpTxDelay, respWireDelay, respmacdelay, latency_tx);
 			fflush(fc_s1m);
+      fflush(fd);
       s1log++;
 		}
 	}
 	fclose(fc_s1m);
-
+  fclose(fd);
 }
 
 FILE *fp;
@@ -321,7 +340,7 @@ void* send_dptp_requests(void *args) {
     if (stat  != BF_SUCCESS) {
       printf("Failed to send packet status=%s\n", bf_err_str(stat));
     }
-    sleep(1);
+    usleep(100000);
   }
 }
 
@@ -590,7 +609,6 @@ int main (int argc, char **argv) {
 	init_tables();
 	pthread_t era_thread;
 	pthread_t timesyncs2s_thread;
-	pthread_t capturets_thread;
   pthread_t dptp_thread;
 
 	printf("Starting dptp_topo Control Plane Unit ..\n");

@@ -13,14 +13,11 @@
 #define COMMAND_TIMESYNC_RESET 0x1
 #define COMMAND_TIMESYNC_REQUEST 0x2
 #define COMMAND_TIMESYNC_RESPONSE 0x3
-#define COMMAND_TIMESYNC_TRANSDELAY 0x4
-#define COMMAND_TIMESYNC_CAPTURE_TX 0x6
 
-#define COMMAND_TIMESYNCS2S_GENTRANSDELAY 0x10
+#define COMMAND_TIMESYNC_CAPTURE_TX 0x6
 #define COMMAND_TIMESYNCS2S_GENREQUEST 0x11
 #define COMMAND_TIMESYNCS2S_REQUEST 0x12
 #define COMMAND_TIMESYNCS2S_RESPONSE 0x13
-#define COMMAND_TIMESYNCS2S_TRANSDELAY 0x14
 
 #define MAX_32BIT 4294967295
 #define MAX_CLIENTS 65536
@@ -114,6 +111,16 @@ header_type timesync_t {
 
 header timesync_t timesync;
 
+header_type transparent_clock_t {
+	fields {
+        udp_chksum_offset   : 8;
+        elapsed_time_offset : 8;
+		captureTs           : 48;
+	}
+}
+
+header transparent_clock_t transparent_clock;
+
 header_type metadata_t {
     fields {
         command : 8;
@@ -157,10 +164,15 @@ parser start {
 	return select(current(96,16)){
 		0x88f7: parse_ethernet;
 		0x0800: parse_ethernet;
-		0x1234: parse_ethernet;
-		default: ingress;
+		default: parse_transparent_clock;
 	}
 }
+
+parser parse_transparent_clock{
+	extract(transparent_clock);
+	return parse_ethernet;
+}
+
 parser parse_ethernet {
     extract(ethernet);
     return select(latest.etherType) {
@@ -417,6 +429,17 @@ blackbox stateful_alu timesyncs2s_egts_lo_set {
     update_lo_1_value: timesync.egts;
 }
 
+
+register timesyncs2s_updts_lo {
+    width:32;
+    instance_count:MAX_SWITCHES;
+}
+@pragma stateful_field_slice timesync.capturets 31 0
+blackbox stateful_alu timesyncs2s_updts_lo_set {
+    reg:timesyncs2s_updts_lo;
+    update_lo_1_value: timesync.capturets;
+}
+
 register timesyncs2s_cp_flag {
     width:32;
     instance_count:1;
@@ -505,6 +528,12 @@ action timesync_response() {
 }
 
 action timesync_capture_tx() {
+    add_header(transparent_clock);
+    modify_field(transparent_clock.udp_chksum_offset,0);
+    modify_field(transparent_clock.elapsed_time_offset,51);
+    modify_field(transparent_clock.captureTs, 0);
+    modify_field(eg_intr_md_for_oport.update_delay_on_tx, 1);
+
     modify_field(eg_intr_md_for_oport.capture_tstamp_on_tx, 1);
 }
 
@@ -627,6 +656,10 @@ action timesyncs2s_capture_now_macTs_lo() {
 
 action timesyncs2s_capture_egTs_lo() {
     timesyncs2s_egts_lo_set.execute_stateful_alu(mdata.switch_id);
+}
+
+action timesyncs2s_capture_updTs_lo() {
+    timesyncs2s_updts_lo_set.execute_stateful_alu(mdata.switch_id);
 }
 
 action timesyncs2s_flag_cp() {
@@ -899,6 +932,11 @@ table timesyncs2s_store_egTs_lo {
     }
 }
 
+table timesyncs2s_store_updTs_lo {
+    actions {
+        timesyncs2s_capture_updTs_lo;
+    }
+}
 @pragma stage 10
 table timesyncs2s_inform_cp {
     reads {
@@ -1089,9 +1127,11 @@ control ingress {
         apply(timesyncs2s_store_now_macTs_lo);
         apply(timesyncs2s_store_macTs_lo);
         apply(timesyncs2s_store_egTs_lo);
+        apply(timesyncs2s_store_updTs_lo);
         apply(timesyncs2s_inform_cp);
         //apply(dropit);
     } else if (mdata.command == COMMAND_TIMESYNC_CAPTURE_TX) {
+        // Follow-up Packet
     	if (ig_intr_md.ingress_port != 192) {
             apply(timesyncs2s_store_capture_tx);
             apply(timesyncs2s_inform_cp_diff);
