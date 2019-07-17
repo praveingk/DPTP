@@ -1,6 +1,6 @@
 # DPTP
 Data-Plane Time synchronization Protocol
-https://www.comp.nus.edu.sg/~pravein/papers/DPTP_SOSR19.pdf
+(https://www.comp.nus.edu.sg/~pravein/papers/DPTP_SOSR19.pdf)
 
 # Topology 
 The Topology used in as below : 
