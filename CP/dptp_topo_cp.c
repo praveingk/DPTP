@@ -340,7 +340,7 @@ void* send_dptp_requests(void *args) {
     if (stat  != BF_SUCCESS) {
       printf("Failed to send packet status=%s\n", bf_err_str(stat));
     }
-    usleep(100000);
+    usleep(200000);
   }
 }
 
@@ -471,6 +471,7 @@ void init_bf_switchd() {
 void init_tables() {
   if (switchid == 1) {
     system("bfshell -f commands-newtopo-tofino1.txt");
+    printf("DONE adding commands!\n");
   } else if (switchid == 2) {
     system("bfshell -f commands-newtopo-tofino2.txt");
   }
