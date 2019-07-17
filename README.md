@@ -41,10 +41,15 @@ sudo ./libmoon/deps/dpdk/usertools/dpdk-devbind.py --b igb_uio <NIC Port>
 ```shell
  sudo ./build/MoonGen examples/dptp_topo.lua <DPDK PORT id1> <DPDK Port id2>
 ```
+Note that "DPDK Port id2" is redundant and is used only for switch-to-host DPTP accuracy measurement. 
 
-Note that "DPDK Port id2" is redundant and is used only for switch-to-host DPTP. 
-For just switch-to-switch DPTP, the command could be :
+### Steps to Create CrossTraffic in the Link(160-176) during DPTP
+
+1) To create cross-traffic in the link being used for synchronization towards the SW1 (i.e. 160 --> 176),
+we simply craft a packet to destination address of SW1 (0x100000000001) and send it from any host link.
 ```shell
- sudo ./build/MoonGen examples/dptp_topo.lua 0 0
+ sudo ./build/MoonGen examples/dptp_topo.lua -d 1 <DPDK PORT id1> <DPDK Port id2>
 ```
-Now, you must be seeing prints on the Switches along with the synchronization accuracy.
+Note that "DPDK Port id2" is redundant and is used only for switch-to-host DPTP accuracy measurement. 
+
+2) To create oversubscribed traffic, run the above example from two 10G host-links.
