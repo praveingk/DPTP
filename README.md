@@ -3,6 +3,7 @@ Data-Plane Time synchronization Protocol
 
 # Topology 
 The Topology used in as below : 
+
 ![DPTP Topology](Tofino-minibed-timesync.png)
 
 
