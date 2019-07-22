@@ -13,6 +13,8 @@
 #include <time.h>
 #include <assert.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <bfsys/bf_sal/bf_sys_intf.h>
@@ -115,7 +117,15 @@ void *monitor_global_ts(void *args) {
 uint32_t max_ns = 1000000000;
 
 void *monitor_timesynctopo_64(void *args) {
-	FILE *fc_s1m = fopen("logs/dptp_s1m.log", "w");
+  
+  // Logic go check logs dir. If absent, create one
+  struct stat st = {0};
+
+  if (stat("./logs", &st) == -1) {
+          mkdir("./logs", 0755);
+  }
+  
+  FILE *fc_s1m = fopen("logs/dptp_s1m.log", "w");
   FILE *fd = fopen("logs/dptp_measurement.log", "w");
   fprintf(fd, "reqMacDelay, replyQueing, respTxDelay, dpTxDelay, undpTxDelay, respWireDelay, respMacDelay, latency\n");
   struct timespec tsp;
