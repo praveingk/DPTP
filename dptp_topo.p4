@@ -939,13 +939,10 @@ table timesyncs2s_store_updTs_lo {
 }
 @pragma stage 10
 table timesyncs2s_inform_cp {
-    reads {
-        mdata.switch_id : exact;
-    }
     actions {
         timesyncs2s_flag_cp;
-        nop;
     }
+    default_action: timesyncs2s_flag_cp;
 }
 @pragma stage 10
 table timesyncs2s_inform_cp_diff {
@@ -986,6 +983,7 @@ table dropit {
     actions {
         _drop;
     }
+    default_action:_drop;
 }
 
 table acl {
@@ -1128,13 +1126,14 @@ control ingress {
         apply(timesyncs2s_store_macTs_lo);
         apply(timesyncs2s_store_egTs_lo);
         apply(timesyncs2s_store_updTs_lo);
-        apply(timesyncs2s_inform_cp);
-        //apply(dropit);
+        //apply(timesyncs2s_inform_cp);
+        apply(dropit);
     } else if (mdata.command == COMMAND_TIMESYNC_CAPTURE_TX) {
         // Follow-up Packet
     	if (ig_intr_md.ingress_port != 192) {
             apply(timesyncs2s_store_capture_tx);
-            apply(timesyncs2s_inform_cp_diff);
+            apply(timesyncs2s_inform_cp);
+            //apply(timesyncs2s_inform_cp_diff);
      	}
     }
     // Forwarding for all packets based on MAC/IP

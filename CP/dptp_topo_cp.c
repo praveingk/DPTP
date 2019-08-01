@@ -117,20 +117,20 @@ void *monitor_global_ts(void *args) {
 uint32_t max_ns = 1000000000;
 
 void *monitor_timesynctopo_64(void *args) {
-  
+
   // Logic go check logs dir. If absent, create one
   struct stat st = {0};
 
   if (stat("./logs", &st) == -1) {
           mkdir("./logs", 0755);
   }
-  
+
   FILE *fc_s1m = fopen("logs/dptp_s1m.log", "w");
   FILE *fd = fopen("logs/dptp_measurement.log", "w");
   fprintf(fd, "reqMacDelay, replyQueing, respTxDelay, dpTxDelay, undpTxDelay, respWireDelay, respMacDelay, latency\n");
-  struct timespec tsp;
-  tsp.tv_sec = 0;
-  tsp.tv_nsec = 500000;
+  // struct timespec tsp;
+  // tsp.tv_sec = 0;
+  // tsp.tv_nsec = 500000;
 
 	int count = 2;
 	uint32_t cp_flag[count];
@@ -192,7 +192,7 @@ void *monitor_timesynctopo_64(void *args) {
 		}
 		int switch_id = cp_flag[i];
 		bf_port_1588_timestamp_tx_get((bf_dev_id_t) 0, reqport, &capture_req_ts, &ts_valid1, &ts_id1);
-    nanosleep(&tsp, NULL); // Hack to address the bug
+    //nanosleep(&tsp, NULL); // Hack to address the bug
 
 		printf("======================Reply Received on Switch(%d)=========================\n", switch_id);
 		// Below are for calculated timestamp
@@ -233,6 +233,7 @@ void *monitor_timesynctopo_64(void *args) {
 		int replyQueing = s2s_egts_lo[i] - s2s_elapsed_lo[i];
 		int respmacdelay = now_igts_lo[i] - now_macts_lo[i];
 		int reqDelay =  capture_req_ts - s2s_reqigts_lo[i];
+    printf("capture_req_ts = %u\n", capture_req_ts);
     printf("capture_resp_ts = %u\n", capture_resp_ts);
 		int respDelay = capture_resp_ts - s2s_elapsed_lo[i];
     int respTxDelay = capture_resp_ts - s2s_egts_lo[i];
@@ -344,13 +345,16 @@ void send_bf_followup_packet(uint8_t *dstAddr, uint32_t capture_tx) {
 }
 
 void* send_dptp_requests(void *args) {
+  int i=0;
+  sleep(3); // Initial packets are lost somehow.
   while (1) {
     printf("Sending DPTP Packets Out..\n");
     bf_status_t stat = bf_pkt_tx(0, bfdptppkt, tx_ring, (void *)bfdptppkt);
     if (stat  != BF_SUCCESS) {
       printf("Failed to send packet status=%s\n", bf_err_str(stat));
     }
-    usleep(200000);
+    usleep(100000);
+    i++;
   }
 }
 
