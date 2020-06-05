@@ -6,7 +6,6 @@ This source code synchronizes two Barefoot Tofino switches to support a global t
 p4_14 : v_14/
 
 p4_16 : v_16/
-The current source code is p4_14 based, and will soon publish the p4_16 code.
 
 # Topology 
 The Topology used in as below : 
