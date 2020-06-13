@@ -15,4 +15,4 @@ else
 fi
 
 source $setbash;
-make -f $makefile clean ; make -f $makefile; ./dptp_topo_cp
+make -f $makefile clean ; make -f $makefile; ./dptp_v16
