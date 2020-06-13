@@ -40,6 +40,7 @@ struct dptp_metadata_t {
     bit<32> dptp_overflow_compare;
     bit<16> ingress_port;
     bit<16> egress_port;
+    bit<32> type;
 }
 
 header bridged_header_t {
@@ -103,6 +104,4 @@ struct header_t {
     ethernet_t          ethernet;
     ipv4_t              ipv4;
     timesync_t          timesync;
-    transparent_clock_t transparent_clock;
-    udp_t               udp;
 }

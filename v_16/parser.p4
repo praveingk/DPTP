@@ -6,15 +6,38 @@
  *
  ******************************************************************************/
 
+#define DPTP_FOLLOWUP_DIGEST_TYPE       2
+#define DPTP_REPLY_DIGEST_TYPE          3
+#define DPTP_REPLY_FOLLOWUP_DIGEST_TYPE 4
 
-#define ETHERTYPE_IPV4  0x0800
-#define ETHERTYPE_DPTP  0x88F7
 
-#define DPTP_DIGEST_TYPE 2
+enum bit<16> ether_type_t {
+    IPV4  = 0x0800,
+    DPTP  = 0x88F7
+}
 
 struct followup_digest_t {
     bit<16> egress_port;
-    bit<48> macAddr;
+    bit<48> mac_addr;
+    bit<32> timestamp;
+}
+
+
+struct reply_digest_t {
+    bit<8> switch_id;
+    bit<32> reference_ts_hi;
+    bit<32> reference_ts_lo;
+    bit<32> elapsed_lo;
+    bit<32> macts_lo;
+    bit<32> egts_lo;
+    bit<32> now_igts_hi;
+    bit<32> now_igts_lo;
+    bit<32> now_macts_lo; 
+}
+
+struct reply_followup_digest_t {
+    bit<8> switch_id;
+    bit<32> tx_capturets_lo;
 }
 
 
@@ -27,6 +50,8 @@ parser DptpIngressParser (
     out ingress_intrinsic_metadata_from_parser_t ig_intr_md_from_prsr) {
 
     state start {
+        pkt.extract(ig_intr_md);
+        pkt.advance(PORT_METADATA_SIZE); // macro defined in tofino.p4
         transition parse_ethernet;
     }
 
@@ -41,25 +66,27 @@ parser DptpIngressParser (
     state parse_ethernet {
         pkt.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
-            ETHERTYPE_DPTP: parse_dptp;
-            ETHERTYPE_IPV4: parse_ipv4;
-            default: accept;
+            (bit<16>) ether_type_t.IPV4 : parse_ipv4;
+            (bit<16>) ether_type_t.DPTP : parse_dptp;
+            default                     : accept;
         }
     }
 
     state parse_transparent_clock {
-        pkt.extract(hdr.transparent_clock);
+        //pkt.extract(hdr.transparent_clock);
         transition parse_ethernet;
     }
 
     state parse_ipv4 {
         pkt.extract(hdr.ipv4);
+        meta.mdata.type = 3;
         transition accept;
     }
     
     state parse_dptp {
         pkt.extract(hdr.timesync);
         meta.mdata.command = hdr.timesync.command;
+        meta.mdata.type = 4;
         // meta.mdata.reference_ts_hi = hdr.timesync.reference_ts_hi;
         // meta.mdata.reference_ts_lo = hdr.timesync.reference_ts_lo;
         // meta.mdata.result_ts_hi = 0;
@@ -74,10 +101,28 @@ control DptpIngressDeparser (
     in metadata_t meta, 
     in ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr) {
 
-    Digest<followup_digest_t>() timesync_inform_cp_digest;
+    Digest<followup_digest_t>()          dptp_followup_digest;
+    Digest<reply_digest_t>()             dptp_reply_digest;
+    Digest<reply_followup_digest_t>()    dptp_reply_followup_digest;
+
     apply {
-        if (ig_intr_md_for_dprsr.digest_type == DPTP_DIGEST_TYPE) {
-            timesync_inform_cp_digest.pack({meta.mdata.egress_port, hdr.ethernet.dstAddr});
+        if (ig_intr_md_for_dprsr.digest_type == DPTP_FOLLOWUP_DIGEST_TYPE) {
+            dptp_followup_digest.pack({meta.mdata.egress_port, hdr.ethernet.dstAddr, meta.mdata.ingress_timestamp_clipped});
+        }
+        if (ig_intr_md_for_dprsr.digest_type == DPTP_REPLY_DIGEST_TYPE) {
+            dptp_reply_digest.pack({meta.mdata.switch_id[7:0],
+                                        hdr.timesync.reference_ts_hi,
+                                        hdr.timesync.reference_ts_lo,
+                                        hdr.timesync.igts[31:0],
+                                        hdr.timesync.igmacts[31:0],
+                                        hdr.timesync.egts[31:0],
+                                        meta.mdata.ingress_timestamp_clipped_hi,
+                                        meta.mdata.ingress_timestamp_clipped,
+                                        meta.mdata.mac_timestamp_clipped});
+        }
+        if (ig_intr_md_for_dprsr.digest_type == DPTP_REPLY_FOLLOWUP_DIGEST_TYPE) {
+            dptp_reply_followup_digest.pack({meta.mdata.switch_id[7:0],
+                                                hdr.timesync.reference_ts_hi});
         }
         pkt.emit(meta.bridged_header);
         //pkt.emit(hdr.transparent_clock);
@@ -93,8 +138,9 @@ parser DptpEgressParser (
     out header_t hdr, 
     out metadata_t meta, 
     out egress_intrinsic_metadata_t eg_intr_md) {
-    
+
     state start {
+        pkt.extract(eg_intr_md);
         transition bridged_metadata;
     }
 
@@ -115,8 +161,8 @@ parser DptpEgressParser (
     state parse_ethernet {
         pkt.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
-            ETHERTYPE_DPTP: parse_dptp;
-            ETHERTYPE_IPV4: parse_ipv4;
+            (bit<16>) ether_type_t.IPV4 : parse_ipv4;
+            (bit<16>) ether_type_t.DPTP : parse_dptp;
             default: accept;
         }
     }
@@ -137,7 +183,7 @@ parser DptpEgressParser (
     }
     
     state parse_transparent_clock {
-        pkt.extract(hdr.transparent_clock);
+        //pkt.extract(hdr.transparent_clock);
         transition parse_ethernet;
     }
 }
@@ -162,9 +208,6 @@ control DptpEgressDeparser(
                  hdr.ipv4.protocol,
                  hdr.ipv4.srcAddr,
                  hdr.ipv4.dstAddr});
-        //pkt.emit(hdr.transparent_clock);
-        pkt.emit(hdr.ethernet);
-        pkt.emit(hdr.ipv4);
-        pkt.emit(hdr.timesync);
+        pkt.emit(hdr);
     }
 }

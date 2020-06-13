@@ -100,6 +100,11 @@ Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_reference_lo;
 
 Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_updts_lo;
 
+Register<bit<32>, bit<32>>(1) test1;
+
+Register<bit<32>, bit<32>>(1) test2;
+
+
 control DptpIngress(
     inout header_t hdr, 
     inout metadata_t meta, 
@@ -107,6 +112,18 @@ control DptpIngress(
     in ingress_intrinsic_metadata_from_parser_t ig_intr_md_from_parser_aux, 
     inout ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr, 
     inout ingress_intrinsic_metadata_for_tm_t ig_intr_md_for_tm) {
+
+    RegisterAction<bit<32>, bit<32>, bit<32>>(test1) test1_set = {
+        void apply(inout bit<32> value) {
+            value = value + 1;
+        }
+    };
+
+    RegisterAction<bit<32>, bit<32>, bit<32>>(test2) test2_set = {
+        void apply(inout bit<32> value) {
+            value = value + 1;
+        }
+    };
 
     RegisterAction<bit<32>, bit<32>, bit<32>>(dptp_now_hi) dptp_now_hi_set = {
         void apply(inout bit<32> value) {
@@ -128,13 +145,13 @@ control DptpIngress(
     
     RegisterAction<bit<32>, bit<32>, bit<32>>(timesyncs2s_egts_lo) timesyncs2s_egts_lo_set = {
         void apply(inout bit<32> value) {
-            value = (bit<32>)hdr.timesync.egts;
+            value = (bit<32>)hdr.timesync.egts[31:0];
         }
     };
     
     RegisterAction<bit<32>, bit<32>, bit<32>>(timesyncs2s_elapsed_lo) timesyncs2s_elapsed_lo_set = {
         void apply(inout bit<32> value) {
-            value = (bit<32>)hdr.timesync.igts;
+            value = (bit<32>)hdr.timesync.igts[31:0];
         }
     };
     
@@ -152,7 +169,7 @@ control DptpIngress(
     
     RegisterAction<bit<32>, bit<32>, bit<32>>(timesyncs2s_igts_lo) timesyncs2s_igts_lo_set = {
         void apply(inout bit<32> value, out bit<32> result) {
-            value = (bit<32>)ig_intr_md_from_parser_aux.global_tstamp[32:0];
+            value = (bit<32>)ig_intr_md_from_parser_aux.global_tstamp[31:0];
             result = value;
         }
     };
@@ -165,7 +182,7 @@ control DptpIngress(
     
     RegisterAction<bit<32>, bit<32>, bit<32>>(timesyncs2s_now_macts_lo) timesyncs2s_now_macts_lo_set = {
         void apply(inout bit<32> value) {
-            value = (bit<32>)ig_intr_md.ingress_mac_tstamp;
+            value = (bit<32>)ig_intr_md.ingress_mac_tstamp[31:0];
         }
     };
     
@@ -256,7 +273,7 @@ control DptpIngress(
     }
     
     action timesync_flag_cp_learn() {
-        ig_intr_md_for_dprsr.digest_type = DPTP_DIGEST_TYPE;
+        ig_intr_md_for_dprsr.digest_type = DPTP_FOLLOWUP_DIGEST_TYPE;
     }
     
     action timesyncs2s_flag_cp() {
@@ -289,7 +306,7 @@ control DptpIngress(
     }
     
     action timesyncs2s_capture_now_macTs_lo() {
-        timesyncs2s_now_macts_lo_set.execute(meta.mdata.switch_id);
+        meta.mdata.mac_timestamp_clipped = timesyncs2s_now_macts_lo_set.execute(meta.mdata.switch_id);
     }
     
     action timesyncs2s_capture_reference_hi() {
@@ -572,6 +589,7 @@ control DptpIngress(
         dptp_store_now_hi.apply();
         dptp_store_now_lo.apply();
         if (meta.mdata.command == COMMAND_TIMESYNCS2S_RESPONSE) {
+            test1_set.execute(0);
             timesyncs2s_store_reference_hi.apply();
             timesyncs2s_store_reference_lo.apply();
             timesyncs2s_store_elapsed_lo.apply();
@@ -579,12 +597,15 @@ control DptpIngress(
             timesyncs2s_store_macTs_lo.apply();
             timesyncs2s_store_egTs_lo.apply();
             timesyncs2s_store_updTs_lo.apply();
+            ig_intr_md_for_dprsr.digest_type = DPTP_REPLY_DIGEST_TYPE;
             dropit.apply();
         } else {
             if (meta.mdata.command == COMMAND_TIMESYNC_CAPTURE_TX) {
+                test2_set.execute(0);
                 if (ig_intr_md.ingress_port != SWITCH_CPU) {
                     timesyncs2s_store_capture_tx.apply();
                     timesyncs2s_inform_cp.apply();
+                    ig_intr_md_for_dprsr.digest_type = DPTP_REPLY_FOLLOWUP_DIGEST_TYPE;
                 }
             }
         }
@@ -655,11 +676,11 @@ control DptpEgress(
     }
 
     action timesync_capture_tx () {
-        hdr.transparent_clock.setValid();
-        hdr.transparent_clock.udp_chksum_offset = 0;
-        hdr.transparent_clock.elapsed_time_offset = 51;
-        hdr.transparent_clock.captureTs = 0;
-        eg_intr_md_for_oport.update_delay_on_tx = 1;
+        // hdr.transparent_clock.setValid();
+        // hdr.transparent_clock.udp_chksum_offset = 0;
+        // hdr.transparent_clock.elapsed_time_offset = 51;
+        // hdr.transparent_clock.captureTs = 0;
+        //eg_intr_md_for_oport.update_delay_on_tx = 1;
         eg_intr_md_for_oport.capture_tstamp_on_tx = 1;
     }
 
