@@ -15,14 +15,13 @@
 #include "headers.p4"
 #include "parser.p4"
 
-#define COMMAND_TIMESYNC_RESET 0x1
-#define COMMAND_TIMESYNC_REQUEST 0x2
-#define COMMAND_TIMESYNC_RESPONSE 0x3
+#define COMMAND_DPTP_REQUEST 0x2
+#define COMMAND_DPTP_RESPONSE 0x3
 
-#define COMMAND_TIMESYNC_CAPTURE_TX 0x6
-#define COMMAND_TIMESYNCS2S_GENREQUEST 0x11
-#define COMMAND_TIMESYNCS2S_REQUEST 0x12
-#define COMMAND_TIMESYNCS2S_RESPONSE 0x13
+#define COMMAND_DPTP_FOLLOWUP 0x6
+#define COMMAND_DPTPS2S_GENREQUEST 0x11
+#define COMMAND_DPTPS2S_REQUEST 0x12
+#define COMMAND_DPTPS2S_RESPONSE 0x13
 
 #define MAX_32BIT 4294967295
 #define MAX_LINKS 512
@@ -34,7 +33,7 @@ Register<bit<32>, bit<32>>(32w20) ts_hi;
 
 Register<bit<32>, bit<32>>(32w20) ts_lo;
 
-control dptp_reference (inout header_t hdr, inout metadata_t meta) {
+control DptpReference (inout header_t hdr, inout metadata_t meta) {
     RegisterAction<bit<32>, bit<32>, bit<32>>(ts_hi) ts_hi_get = {
         void apply (inout bit<32> value, out bit<32> result) {
             result = value;
@@ -100,9 +99,49 @@ Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_reference_lo;
 
 Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_updts_lo;
 
-Register<bit<32>, bit<32>>(1) test1;
+control DptpNow (inout header_t hdr, inout metadata_t meta) {
 
-Register<bit<32>, bit<32>>(1) test2;
+    action do_dptp_compare_residue() {
+        meta.mdata.dptp_overflow_compare = (meta.mdata.dptp_residue <= meta.mdata.ingress_timestamp_clipped ? meta.mdata.dptp_residue : meta.mdata.ingress_timestamp_clipped);
+    }
+
+    action do_dptp_handle_overflow () {
+        meta.mdata.dptp_now_hi = meta.mdata.dptp_now_hi + 1;
+    }
+    
+    action nop () {
+
+    }
+    
+    table dptp_handle_overflow {
+        actions = {
+            do_dptp_handle_overflow();
+            nop();
+        }
+        key = {
+            meta.mdata.dptp_compare_residue: exact;
+        }
+        default_action = do_dptp_handle_overflow();
+    }
+
+    apply {
+        meta.mdata.dptp_now_hi = meta.mdata.reference_ts_hi + meta.mdata.ingress_timestamp_clipped_hi;
+        meta.mdata.dptp_residue = MAX_32BIT - meta.mdata.reference_ts_lo;
+        do_dptp_compare_residue();
+        meta.mdata.dptp_compare_residue = meta.mdata.ingress_timestamp_clipped - meta.mdata.dptp_overflow_compare;
+        meta.mdata.dptp_now_lo = meta.mdata.reference_ts_lo + meta.mdata.ingress_timestamp_clipped;
+        dptp_handle_overflow.apply();
+    }
+}
+
+
+control DptpCalc (inout header_t hdr, inout metadata_t meta) {
+
+    apply {
+        
+
+    }
+}
 
 
 control DptpIngress(
@@ -112,18 +151,6 @@ control DptpIngress(
     in ingress_intrinsic_metadata_from_parser_t ig_intr_md_from_parser_aux, 
     inout ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr, 
     inout ingress_intrinsic_metadata_for_tm_t ig_intr_md_for_tm) {
-
-    RegisterAction<bit<32>, bit<32>, bit<32>>(test1) test1_set = {
-        void apply(inout bit<32> value) {
-            value = value + 1;
-        }
-    };
-
-    RegisterAction<bit<32>, bit<32>, bit<32>>(test2) test2_set = {
-        void apply(inout bit<32> value) {
-            value = value + 1;
-        }
-    };
 
     RegisterAction<bit<32>, bit<32>, bit<32>>(dptp_now_hi) dptp_now_hi_set = {
         void apply(inout bit<32> value) {
@@ -224,30 +251,6 @@ control DptpIngress(
         hdr.timesync.era_ts_hi = meta.mdata.era_ts_hi;
         hdr.timesync.igmacts = ig_intr_md.ingress_mac_tstamp;
         hdr.timesync.igts = ig_intr_md_from_parser_aux.global_tstamp;
-    }
-    
-    action do_dptp_add_elapsed_hi() {
-        meta.mdata.dptp_now_hi = meta.mdata.reference_ts_hi + meta.mdata.ingress_timestamp_clipped_hi;
-    }
-
-    action do_dptp_add_elapsed_lo() {
-        meta.mdata.dptp_now_lo = meta.mdata.reference_ts_lo + meta.mdata.ingress_timestamp_clipped;
-    }
-
-    action do_dptp_calc_residue() {
-        meta.mdata.dptp_residue = MAX_32BIT - meta.mdata.reference_ts_lo;
-    }
-    
-    action do_dptp_compare_igts() {
-        meta.mdata.dptp_compare_residue = meta.mdata.ingress_timestamp_clipped - meta.mdata.dptp_overflow_compare;
-    }
-
-    action do_dptp_compare_residue() {
-        meta.mdata.dptp_overflow_compare = (meta.mdata.dptp_residue <= meta.mdata.ingress_timestamp_clipped ? meta.mdata.dptp_residue : meta.mdata.ingress_timestamp_clipped);
-    }
-    
-    action do_dptp_handle_overflow() {
-        meta.mdata.dptp_now_hi = meta.mdata.dptp_now_hi + 1;
     }
     
     action do_dptp_store_now_hi() {
@@ -363,52 +366,6 @@ control DptpIngress(
         }
         key = {
             meta.mdata.command: exact;
-        }
-        default_action = nop();
-    }
-    
-    table dptp_add_elapsed_hi {
-        actions = {
-            do_dptp_add_elapsed_hi();
-        }
-        default_action = do_dptp_add_elapsed_hi();
-    }
-    
-    table dptp_add_elapsed_lo {
-        actions = {
-            do_dptp_add_elapsed_lo();
-        }
-        default_action = do_dptp_add_elapsed_lo();
-    }
-    
-    table dptp_calc_residue {
-        actions = {
-            do_dptp_calc_residue();
-        }
-        default_action = do_dptp_calc_residue();
-    }
-    
-    table dptp_compare_igts {
-        actions = {
-            do_dptp_compare_igts();
-        }
-        default_action = do_dptp_compare_igts();
-    }
-    
-    table dptp_compare_residue {
-        actions = {
-            do_dptp_compare_residue();
-        }
-        default_action = do_dptp_compare_residue();
-    }
-    
-    table dptp_handle_overflow {
-        actions = {
-            do_dptp_handle_overflow();
-            nop();
-        }
-        key = {
-            meta.mdata.dptp_compare_residue: exact;
         }
         default_action = nop();
     }
@@ -568,9 +525,11 @@ control DptpIngress(
         default_action = timesyncs2s_capture_updTs_lo();
     }
     
-    dptp_reference() dptp_get_ref;
+    DptpReference() dptp_get_ref;
+    DptpNow() dptp_now;
 
     apply {
+        // Virtualization using loopback cables.
         acl.apply();
         if (hdr.timesync.isValid()) {
             classify_logical_switch.apply();
@@ -578,33 +537,22 @@ control DptpIngress(
             flip_address.apply();
         }
         timesyncs2s_store_igTs_hi.apply();
-        timesyncs2s_store_igTs_lo.apply();
+        meta.mdata.ingress_timestamp_clipped = (bit<32>)ig_intr_md_from_parser_aux.global_tstamp[31:0];
         dptp_get_ref.apply(hdr, meta);
-        dptp_add_elapsed_hi.apply();
-        dptp_calc_residue.apply();
-        dptp_compare_residue.apply();
-        dptp_compare_igts.apply();
-        dptp_add_elapsed_lo.apply();
-        dptp_handle_overflow.apply();
+        dptp_now.apply(hdr, meta);
+
         dptp_store_now_hi.apply();
         dptp_store_now_lo.apply();
-        if (meta.mdata.command == COMMAND_TIMESYNCS2S_RESPONSE) {
-            test1_set.execute(0);
-            timesyncs2s_store_reference_hi.apply();
-            timesyncs2s_store_reference_lo.apply();
-            timesyncs2s_store_elapsed_lo.apply();
-            timesyncs2s_store_now_macTs_lo.apply();
-            timesyncs2s_store_macTs_lo.apply();
-            timesyncs2s_store_egTs_lo.apply();
-            timesyncs2s_store_updTs_lo.apply();
+        if (meta.mdata.command == COMMAND_DPTPS2S_RESPONSE) {
+            meta.mdata.mac_timestamp_clipped = (bit<32>)ig_intr_md.ingress_mac_tstamp[31:0];
             ig_intr_md_for_dprsr.digest_type = DPTP_REPLY_DIGEST_TYPE;
-            dropit.apply();
+            _drop();
         } else {
-            if (meta.mdata.command == COMMAND_TIMESYNC_CAPTURE_TX) {
-                test2_set.execute(0);
+            if (meta.mdata.command == COMMAND_DPTP_FOLLOWUP) {
                 if (ig_intr_md.ingress_port != SWITCH_CPU) {
-                    timesyncs2s_store_capture_tx.apply();
-                    timesyncs2s_inform_cp.apply();
+                    //timesyncs2s_store_capture_tx.apply();
+                    //timesyncs2s_inform_cp.apply();
+                    _drop();
                     ig_intr_md_for_dprsr.digest_type = DPTP_REPLY_FOLLOWUP_DIGEST_TYPE;
                 }
             }
@@ -623,8 +571,6 @@ control DptpIngress(
 
 Register<bit<32>, bit<32>>(MAX_LINKS) current_utilization;
 
-Register<bit<32>, bit<32>>(1) egress_timestamp_clipped;
-
 Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_reqts_lo;
 
 control DptpEgress(
@@ -634,16 +580,6 @@ control DptpEgress(
     in egress_intrinsic_metadata_from_parser_t eg_intr_md_from_parser_aux,
     inout egress_intrinsic_metadata_for_deparser_t eg_intr_md_for_dprsr,
     inout egress_intrinsic_metadata_for_output_port_t eg_intr_md_for_oport) {
-
-    RegisterAction<bit<32>, bit<32>, bit<32>>(egress_timestamp_clipped) clip_egress_timestamp = {
-        void apply (inout bit<32> value, out bit<32> rv) {
-            rv = 32w0;
-            bit<32> in_value;
-            in_value = value;
-            value = (bit<32>)eg_intr_md_from_parser_aux.global_tstamp;
-            rv = value;
-        }
-    };
 
     Lpf<bit<16>, bit<32>>(MAX_LINKS) current_utilization_bps;
 
@@ -675,7 +611,7 @@ control DptpEgress(
         set_current_utilization.execute(meta.mdata.link);
     }
 
-    action timesync_capture_tx () {
+    action do_dptp_capture_tx () {
         // hdr.transparent_clock.setValid();
         // hdr.transparent_clock.udp_chksum_offset = 0;
         // hdr.transparent_clock.elapsed_time_offset = 51;
@@ -684,28 +620,19 @@ control DptpEgress(
         eg_intr_md_for_oport.capture_tstamp_on_tx = 1;
     }
 
-    action timesync_do_clip_egts () {
-        meta.mdata.egress_timestamp_clipped = clip_egress_timestamp.execute(32w0);
-    }
-
-    action do_timesync_current_rate () {
+    action do_dptp_response () {
+        hdr.timesync.command = COMMAND_DPTP_RESPONSE;
+        hdr.timesync.egts = eg_intr_md_from_parser_aux.global_tstamp;
         hdr.timesync.current_rate = meta.mdata.current_utilization;
     }
-
-    action timesync_calculate_egdelta () {
+    action do_dptps2s_request () {
+        hdr.timesync.command = COMMAND_DPTPS2S_REQUEST;
+    }
+    action do_dptps2s_response () {
+        hdr.timesync.command = COMMAND_DPTPS2S_RESPONSE;
         hdr.timesync.egts = eg_intr_md_from_parser_aux.global_tstamp;
     }
-    action timesync_response () {
-        hdr.timesync.command = COMMAND_TIMESYNC_RESPONSE;
-    }
-    action timesyncs2s_request () {
-        timesyncs2s_reqts_lo_set.execute(meta.mdata.src_switch_id);
-        hdr.timesync.command = COMMAND_TIMESYNCS2S_REQUEST;
-    }
-    action timesyncs2s_response () {
-        hdr.timesync.command = COMMAND_TIMESYNCS2S_RESPONSE;
-        timesync_calculate_egdelta();
-    }
+
     /*** Tables ***/
     table calc_current_utilization {
         actions = {
@@ -725,9 +652,9 @@ control DptpEgress(
         default_action = do_store_current_utilization();
     }
 
-    table timesync_capture_ts {
+    table dptp_capture_tx {
         actions = {
-            timesync_capture_tx();
+            do_dptp_capture_tx();
             nop();
         }
         key = {
@@ -743,69 +670,20 @@ control DptpEgress(
         default_action = timesync_do_clip_egts();
     }
 
-    table timesync_current_rate {
-        actions = {
-            do_timesync_current_rate();
-        }
-        default_action = do_timesync_current_rate();
-    }
-
-    table timesync_delta {
-        actions = {
-            timesync_calculate_egdelta();
-        }
-        default_action = timesync_calculate_egdelta();
-    }
-
-    table timesync_gen_response {
-        actions = {
-            timesync_response();
-        }
-        default_action = timesync_response();
-    }
-
-    table timesyncs2s_gen_request {
-        actions = {
-            timesyncs2s_request();
-            nop();
-        }
-        key = {
-            meta.mdata.switch_id: exact;
-        }
-        default_action = nop();
-    }
-
-    table timesyncs2s_gen_response {
-        actions = {
-            timesyncs2s_response();
-            nop();
-        }
-        key = {
-            meta.mdata.switch_id: exact;
-        }
-        default_action = nop();
-    }
 
     apply {
         if (eg_intr_md.pkt_length != 0) {
             calc_current_utilization.apply();
         }
         if (hdr.timesync.isValid()) {
-            timesync_clip_egts.apply();
-            timesync_capture_ts.apply();
-            if (meta.mdata.command == COMMAND_TIMESYNCS2S_REQUEST) {
-                timesyncs2s_gen_response.apply();
-            } else {
-                if (meta.mdata.command == COMMAND_TIMESYNC_REQUEST) {
-                    timesync_gen_response.apply();
-                    timesync_delta.apply();
-                    timesync_current_rate.apply();
-                } else {
-                    if (meta.mdata.command == COMMAND_TIMESYNCS2S_GENREQUEST) {
-                        timesyncs2s_gen_request.apply();
-                    }
-                }
-            }
+            dptp_capture_tx.apply();
+            if (meta.mdata.command == COMMAND_DPTPS2S_REQUEST) {
+                do_dptps2s_response();
+            } else if (meta.mdata.command == COMMAND_DPTP_REQUEST) {
+                do_dptp_response();
+            } else if (meta.mdata.command == COMMAND_DPTPS2S_GENREQUEST) {
+                do_dptps2s_request();
+            }       
         }
         store_current_utilization.apply();
     }
