@@ -24,9 +24,10 @@ struct followup_digest_t {
 
 
 struct reply_digest_t {
-    bit<8> switch_id;
+    bit<8>  switch_id;
     bit<32> reference_ts_hi;
     bit<32> reference_ts_lo;
+    //bit<16> elapsed_hi;
     bit<32> elapsed_lo;
     bit<32> macts_lo;
     bit<32> egts_lo;
@@ -113,6 +114,7 @@ control DptpIngressDeparser (
             dptp_reply_digest.pack({meta.mdata.switch_id[7:0],
                                         hdr.timesync.reference_ts_hi,
                                         hdr.timesync.reference_ts_lo,
+                                        //hdr.timesync.igts[47:32],
                                         hdr.timesync.igts[31:0],
                                         hdr.timesync.igmacts[31:0],
                                         hdr.timesync.egts[31:0],
