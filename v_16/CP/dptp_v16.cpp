@@ -193,6 +193,7 @@ namespace dptp
   bf_rt_id_t learn_rswitch_id = 0;
   bf_rt_id_t learn_reference_ts_hi = 0; 
   bf_rt_id_t learn_reference_ts_lo = 0;
+  bf_rt_id_t learn_elapsed_hi = 0;
   bf_rt_id_t learn_elapsed_lo = 0;
   bf_rt_id_t learn_macts_lo = 0;
   bf_rt_id_t learn_egts_lo = 0;
@@ -314,10 +315,44 @@ namespace dptp
     bf_status = session->commitTransaction(true);
   }
 
-  void writeReferenceTs (const uint64_t ts_sec, const uint64_t ts_nsec) {
-    bf_status = reg_ts_hi_data->setValue(reg_ts_hi_f1, ts_sec);
+  void initReferenceTsAPI () {
+    bf_status = reg_ts_hi->keyAllocate(&reg_ts_hi_key);
+    bf_status = reg_ts_hi->dataAllocate(&reg_ts_hi_data);
+    bf_status = reg_ts_lo->keyAllocate(&reg_ts_lo_key);
+    bf_status = reg_ts_lo->dataAllocate(&reg_ts_lo_data);    
     assert(bf_status == BF_SUCCESS);
-    bf_status = reg_ts_lo_data->setValue(reg_ts_lo_f1, ts_nsec);
+  }
+  void readReferenceTs(uint32_t *ts_hi, uint32_t *ts_lo, uint8_t switch_id) {
+    bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, (uint64_t)switch_id);
+    bf_status = reg_ts_lo_key->setValue(reg_ts_lo_index, (uint64_t)switch_id);
+
+    bf_status = reg_ts_hi->tableEntryGet(*session, dev_tgt, *(reg_ts_hi_key.get()), hwflag, reg_ts_hi_data.get());
+    assert(bf_status == BF_SUCCESS);
+
+    std::vector<uint64_t> ts_hi_val;
+    bf_status = reg_ts_hi_data->getValue(reg_ts_hi_f1, &ts_hi_val);
+    assert(bf_status == BF_SUCCESS);
+
+    bf_status = reg_ts_lo->tableEntryGet(*session, dev_tgt, *(reg_ts_lo_key.get()), hwflag, reg_ts_lo_data.get());
+    assert(bf_status == BF_SUCCESS);
+    std::vector<uint64_t> ts_lo_val;
+    bf_status = reg_ts_lo_data->getValue(reg_ts_lo_f1, &ts_lo_val);
+    assert(bf_status == BF_SUCCESS);
+
+    *ts_hi = (uint32_t)ts_hi_val[0];
+    *ts_lo = (uint32_t)ts_lo_val[0];
+    printf("ts_hi content: %u\n", *ts_hi);
+    printf("ts_lo content: %u\n", *ts_lo);
+  }
+
+  void writeReferenceTs (const uint64_t ts_hi, const uint64_t ts_lo, uint64_t switch_id) {
+    bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, switch_id);
+    assert(bf_status == BF_SUCCESS);
+    bf_status = reg_ts_hi_data->setValue(reg_ts_hi_f1, ts_hi);
+    assert(bf_status == BF_SUCCESS);
+    bf_status = reg_ts_lo_key->setValue(reg_ts_lo_index, switch_id);
+    assert(bf_status == BF_SUCCESS);
+    bf_status = reg_ts_lo_data->setValue(reg_ts_lo_f1, ts_lo);
     assert(bf_status == BF_SUCCESS);
 
     bf_status = session->beginTransaction(false);
@@ -333,8 +368,9 @@ namespace dptp
   }
 
   /* Sets the global 64-bit Reference Time of master.
-   The reference is stored in reference_ts_lo[0] and reference_ts_hi[0]
-   Currently uses the CPU clock time as global Time */ 
+     The reference is stored in reference_ts_lo[0] and reference_ts_hi[0]
+     Currently uses the CPU clock time as global Time 
+   */ 
   void initReferenceTs () {
     struct timespec tsp;
     int max_ns = 1000000000;
@@ -367,7 +403,7 @@ namespace dptp
       ts_nsec  = ts_nsec - offset_t_lo;
     }
     // Write the Registers
-    writeReferenceTs((const uint64_t)ts_sec, (const uint64_t)ts_nsec);
+    writeReferenceTs((const uint64_t)ts_sec, (const uint64_t)ts_nsec, 0);
 
     // printf("Setting Time tv_sec = %u, tv_nsec = %u\n", ts_sec, ts_nsec);
     // time_r = ((time_r | ts_sec) << 32) | ts_nsec;
@@ -557,6 +593,7 @@ namespace dptp
   uint64_t s2s_reference_hi[MAX_SWITCHES];
   uint64_t s2s_reference_lo[MAX_SWITCHES];
   uint64_t s2s_macts_lo[MAX_SWITCHES];
+  uint64_t s2s_elapsed_hi[MAX_SWITCHES];
   uint64_t s2s_elapsed_lo[MAX_SWITCHES];
   uint64_t s2s_egts_lo[MAX_SWITCHES];
   uint64_t now_macts_lo[MAX_SWITCHES];
@@ -565,6 +602,14 @@ namespace dptp
   uint64_t capture_req_tx[MAX_SWITCHES];
   uint64_t capture_resp_tx[MAX_SWITCHES];
 
+  uint32_t s2s_reference_hi_d[MAX_SWITCHES];
+  uint32_t s2s_reference_lo_d[MAX_SWITCHES];
+  uint32_t now_igts_hi_d[MAX_SWITCHES];
+  uint32_t now_igts_lo_d[MAX_SWITCHES];
+  
+  
+
+  uint32_t max_ns = 1000000000;
   bf_status_t replyDigestCallback(const bf_rt_target_t &bf_rt_tgt,
                             const std::shared_ptr<bfrt::BfRtSession> bfrtsession,
                             std::vector<std::unique_ptr<bfrt::BfRtLearnData>> vec,
@@ -595,24 +640,94 @@ namespace dptp
       vec[i].get()->getValue(learn_reference_ts_hi, &s2s_reference_hi[switch_id]);          
       vec[i].get()->getValue(learn_reference_ts_lo, &s2s_reference_lo[switch_id]);          
       vec[i].get()->getValue(learn_macts_lo, &s2s_macts_lo[switch_id]);   
+      //vec[i].get()->getValue(learn_elapsed_hi, &s2s_elapsed_hi[switch_id]);  
       vec[i].get()->getValue(learn_elapsed_lo, &s2s_elapsed_lo[switch_id]);  
       vec[i].get()->getValue(learn_egts_lo, &s2s_egts_lo[switch_id]);   
       vec[i].get()->getValue(learn_now_macts_lo, &now_macts_lo[switch_id]);   
       vec[i].get()->getValue(learn_now_igts_hi, &now_igts_hi[switch_id]);   
       vec[i].get()->getValue(learn_now_igts_lo, &now_igts_lo[switch_id]);
-      printf("Reference_hi   = %u, Reference_lo=%u\n", s2s_reference_hi[switch_id], s2s_reference_lo[switch_id]);
+      uint64_t reference_ts_c = 0;
+      reference_ts_c = ((reference_ts_c | (uint32_t)s2s_reference_hi[switch_id]) << 32) | (uint32_t)s2s_reference_lo[switch_id];
+      uint32_t a = reference_ts_c / max_ns;
+      uint32_t b = reference_ts_c % max_ns;
+      s2s_reference_hi_d[switch_id] = a;
+      s2s_reference_lo_d[switch_id] = b;
+  		uint64_t now_igts_c = 0;
+		  now_igts_c = ((now_igts_c | now_igts_hi[switch_id]) << 32) | now_igts_lo[switch_id];
+      a = now_igts_c / max_ns;
+      b = now_igts_c % max_ns;
+      now_igts_hi_d[switch_id] = a;
+      now_igts_lo_d[switch_id] = b;
+
+      printf("Reference_hi   = %u, Reference_lo   =%u\n", s2s_reference_hi[switch_id], s2s_reference_lo[switch_id]);
+      printf("Reference TS   = %lu\n", reference_ts_c);
+      printf("Reference_hi_d = %u, Reference_lo_d =%u\n", s2s_reference_hi_d[switch_id], s2s_reference_lo_d[switch_id]);
+
       printf("capture_req_tx = %u\n", (capture_req_tx[switch_id] & 0xFFFFFFFF));
       printf("s2s_macts_lo   = %u\n", s2s_macts_lo[switch_id]);
-      printf("s2s_elapsed_lo = %u\n", s2s_elapsed_lo[switch_id]);
+      printf("s2s_elapsed_hi = %u, s2s_elapsed_lo = %u\n", s2s_elapsed_hi[switch_id], s2s_elapsed_lo[switch_id]);
       printf("s2s_egts_lo    = %u\n", s2s_egts_lo[switch_id]);
       printf("now_macts_lo   = %u\n", now_macts_lo[switch_id]); 
       printf("now_igts_lo    = %u\n", now_igts_lo[switch_id]); 
-      printf("now_igts_hi    = %u\n", now_igts_hi[switch_id]); 
+      printf("now_igts_hi_d  = %u, now_igts_lo_d = %u\n", now_igts_hi_d[switch_id], now_igts_lo_d[switch_id]); 
+
     }
+
+    initReferenceTsAPI();
 
     auto bf_status = bfrtLearnReply->bfRtLearnNotifyAck(bfrtsession, learn_msg_hdl);
     assert(bf_status == BF_SUCCESS);
     return BF_SUCCESS;
+  }
+
+
+
+  void writeCalcRefTs (uint32_t calc_time_hi_dptp, 
+                       uint32_t calc_time_lo_dptp, 
+                       uint32_t now_elapsed_hi, 
+                       uint32_t now_elapsed_lo,
+                       uint8_t switch_id) {
+    uint64_t ref_calc_time_hi  = calc_time_hi_dptp - now_elapsed_hi;
+    uint64_t ref_calc_time_lo;
+    if (calc_time_lo_dptp < now_elapsed_lo) {
+      ref_calc_time_lo = (calc_time_lo_dptp + max_ns) - now_elapsed_lo;
+      ref_calc_time_hi -= 1;
+    } else {
+      ref_calc_time_lo  = calc_time_lo_dptp - now_elapsed_lo;
+    }
+    uint64_t reference_ts = ((uint64_t)ref_calc_time_hi * (uint64_t)max_ns) + ref_calc_time_lo;
+    ref_calc_time_hi = (reference_ts >> 32) & 0xFFFFFFFF;
+    ref_calc_time_lo = reference_ts & 0xFFFFFFFF;        
+    writeReferenceTs(ref_calc_time_hi, ref_calc_time_lo, (uint64_t)switch_id);           
+  }
+
+  void reportDptpError (uint32_t calc_time_hi, 
+                        uint32_t calc_time_lo,                       
+                        uint32_t now_elapsed_hi, 
+                        uint32_t now_elapsed_lo, 
+                        uint8_t master_switch) {
+
+    uint32_t master_ts_hi, master_ts_lo;
+    uint64_t reference_ts_master = 0;
+    initReferenceTsAPI();
+    readReferenceTs(&master_ts_hi, &master_ts_lo, master_switch);
+    reference_ts_master = ((reference_ts_master | master_ts_hi) << 32) | master_ts_lo;
+    uint32_t reference_hi_master_r = reference_ts_master / max_ns;
+    uint32_t reference_lo_master_r = reference_ts_master % max_ns;
+
+    printf("ref %u,%u\n", reference_hi_master_r, reference_lo_master_r);
+  	uint32_t master_now_hi = reference_hi_master_r + now_elapsed_hi;
+		uint32_t master_now_lo = reference_lo_master_r + now_elapsed_lo;
+    if (master_now_lo >= max_ns) {
+      //printf("orig_time_lo Wrapup!\n");
+      master_now_lo -= max_ns;
+      master_now_hi += 1;
+    }
+    printf("calc_time_hi(Ground Truth) = %u s, calc_time_lo(Ground Truth) = %u ns\n", master_now_hi, master_now_lo);
+    printf("calc_time_hi(DPTP)         = %u s, calc_time_lo(DPTP)         = %u ns\n", calc_time_hi, calc_time_lo);
+    printf("-------------------------------------------------\n");
+    printf("Error in Synchronization   = %d ns\n", calc_time_lo - master_now_lo);
+    printf("-------------------------------------------------\n");
   }
 
   bf_status_t replyFollowupDigestCallback(const bf_rt_target_t &bf_rt_tgt,
@@ -633,12 +748,12 @@ namespace dptp
 
     for (;i<vec.size();i++) {
       vec[i].get()->getValue(learn_rswitch_id, 1, &switch_id);          
-      printf("Reply Followup received on switch %d\n", switch_id);
+      //printf("Reply Followup received on switch %d\n", switch_id);
       if (switch_id > MAX_SWITCHES) {
         printf("Not expecting this switch-id, return!!\n");
       }
       vec[i].get()->getValue(learn_tx_capturets_lo, &capture_resp_tx[switch_id]);      
-      printf("capture_resp_tx = %u\n", capture_resp_tx[switch_id]);
+      printf("capture_resp_tx= %u\n", capture_resp_tx[switch_id]);
 
       int reqWireDelay  = s2s_macts_lo[switch_id] - capture_req_tx[switch_id];
       int ReqMacDelay   = s2s_elapsed_lo[switch_id] - s2s_macts_lo[switch_id];
@@ -648,8 +763,11 @@ namespace dptp
       int respTxDelay   = capture_resp_tx[switch_id] - s2s_egts_lo[switch_id];
       int latency_tx    = now_macts_lo[switch_id] - capture_req_tx[switch_id];
       int respWireDelay = now_macts_lo[switch_id] - capture_resp_tx[switch_id];
-      // int dpTxDelay = s2s_updts_lo[switch_id] - s2s_egts_lo[switch_id];
-      // int undpTxDelay = respTxDelay - dpTxDelay;
+      int respTDelay = (latency_tx - ReqMacDelay - respDelay)/2 + respDelay + respmacdelay;
+
+      uint32_t calc_time_hi_dptp = s2s_reference_hi_d[switch_id]  + (respTDelay / max_ns);
+		  uint32_t calc_time_lo_dptp = s2s_reference_lo_d[switch_id]  + (respTDelay % max_ns);
+      writeCalcRefTs(calc_time_hi_dptp, calc_time_lo_dptp, now_igts_hi_d[switch_id], now_igts_lo_d[switch_id], switch_id);
       printf("-------------------------------------------------\n");
       printf("                     Switch %d             \n", switch_id);
       printf("-------------------------------------------------\n");
@@ -662,8 +780,12 @@ namespace dptp
       printf("Response Wire Delay               = %d ns\n", respWireDelay);
       printf("Response Mac Delay                = %d ns\n", respmacdelay);
       printf("Total RTT (RespRx - ReqTx)        = %d ns\n", latency_tx);
+      printf("Total Response Delay              = %d ns\n", respTDelay);
       printf("-------------------------------------------------\n");
+      reportDptpError(calc_time_hi_dptp, calc_time_lo_dptp, now_igts_hi_d[switch_id], now_igts_lo_d[switch_id], 0);
+      // reportStats()
     }
+
 
     auto bf_status = bfrtLearnReplyFop->bfRtLearnNotifyAck(bfrtsession, learn_msg_hdl);
     assert(bf_status == BF_SUCCESS);
@@ -688,6 +810,8 @@ namespace dptp
     assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("reference_ts_lo", &learn_reference_ts_lo);
     assert(bf_status == BF_SUCCESS);
+    // bf_status = bfrtLearnReply->learnFieldIdGet("elapsed_hi", &learn_elapsed_hi);
+    // assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("elapsed_lo", &learn_elapsed_lo);
     assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("macts_lo", &learn_macts_lo);
