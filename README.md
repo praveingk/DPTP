@@ -3,9 +3,9 @@ Data-Plane Time synchronization Protocol
 (https://www.comp.nus.edu.sg/~pravein/papers/DPTP_SOSR19.pdf)
 This source code synchronizes two Barefoot Tofino switches to support a global timing (64-bit) in the data-plane. 
 
-p4_14 : v_14/
+p4_14 : v_14/ (Tested on SDE 8.x.x)
 
-p4_16 : v_16/
+p4_16 : v_16/ (Tested on SDE 9.x.x)
 
 
 # Topology 
