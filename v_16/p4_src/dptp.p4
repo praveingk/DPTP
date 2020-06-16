@@ -570,20 +570,19 @@ control DptpIngress(
         meta.mdata.ingress_timestamp_clipped = (bit<32>)ig_intr_md_from_parser_aux.global_tstamp[31:0];
         dptp_get_ref.apply(hdr, meta);
         dptp_now.apply(hdr, meta);
+        // Current Global time is now available here.
 
-        dptp_store_now_hi.apply();
-        dptp_store_now_lo.apply();
         if (meta.mdata.command == COMMAND_DPTPS2S_RESPONSE) {
             meta.mdata.mac_timestamp_clipped = (bit<32>)ig_intr_md.ingress_mac_tstamp[31:0];
             ig_intr_md_for_dprsr.digest_type = DPTP_REPLY_DIGEST_TYPE;
             _drop();
+            // Send Digest to Control-plane along with reply details
         } else {
             if (meta.mdata.command == COMMAND_DPTP_FOLLOWUP) {
                 if (ig_intr_md.ingress_port != SWITCH_CPU) {
-                    //timesyncs2s_store_capture_tx.apply();
-                    //timesyncs2s_inform_cp.apply();
                     _drop();
                     ig_intr_md_for_dprsr.digest_type = DPTP_REPLY_FOLLOWUP_DIGEST_TYPE;
+                    // Send Digest to Control-plane along with reply details for Time calculation.
                 }
             }
         }
@@ -707,7 +706,7 @@ control DptpEgress(
                 do_dptps2s_request();
             }       
         }
-        store_current_utilization.apply();
+        //store_current_utilization.apply();
     }
 }
 
