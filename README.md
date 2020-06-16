@@ -19,7 +19,7 @@ A single tofino switch named "tofino1" is virtualized into two switches Master(M
 
 1) Navigate to the SDE PATH :
 ```shell
-     cd ~/bf-sde-8.x.x
+     cd ~/bf-sde-9.x.x
 ```
 2) Set the env variables : 
 ```shell
@@ -27,11 +27,11 @@ A single tofino switch named "tofino1" is virtualized into two switches Master(M
 ```
 3) Build the p4 program using the command :
 ```shell
-     ./p4_build ../<YOUR PATH>/DPTP/dptp.p4
+     ./p4_build ../<YOUR PATH>/DPTP/v_16/p4_src/dptp.p4
 ```
 4) Load the p4 program, and run the control plane API code using :
 ```shell
-     "cd ../<YOUR PATH>/CP"
+     "cd ../<YOUR PATH>/DPTP/v_16/CP"
      "./run.sh"
 ```
 5) This should automatically start the synchronization between Switch1 and master through packets from control-plane.
