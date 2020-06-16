@@ -138,7 +138,37 @@ control DptpNow (inout header_t hdr, inout metadata_t meta) {
 control DptpCalc (inout header_t hdr, inout metadata_t meta) {
 
     apply {
-        
+        /*
+        What info we need for time calculation/offset at data-plane?
+        1) ReqCaptureTx
+        2) ReqMacDelay (igress - mac from server)
+        3) ReferenceTs
+        4) ElapsedTs (IgTs)
+        4) RespCaptureTx 
+        5) NowMacDelay (nowIgTs - nowMacTs )
+        6) Now (nowIgTs)
+
+        Upon receiving the followup packet.
+            latency_tx = nowMacTs - ReqCaptureTx           => Stage 1
+            respDelay  = RespCaptureTx - ElapsedTs         => Stage 1
+            
+            A = ReqMacDelay - respDelay                    => Stage 2       
+            Resp = respDelay + NowMacDelay                 => Stage 2
+            Wire = (latency_tx - A) >> 1                   => Stage 3
+
+            RespDelay = Wire + Resp                        => Stage 4
+
+            Reference_lo = Reference_lo + RespDelay_lo     => Stage 5
+            Reference_hi = Reference_hi - nowIgTs       
+            if (Reference_lo > nowIgTs_lo)                 => Stage 6
+                Reference_lo = Reference_lo - nowIgTs_lo   => Stage 7
+                Reference_hi = Reference_hi - nowIgTs_hi   => Stage 7
+            else                    
+                Reference_lo = (Reference_lo + MAX_32BIT) - nowIgTs_lo -> Need to figure how to do this.
+                Reference_hi = Reference_hi - 1
+
+        Recirculate the followup packet, and update the actual Reference Register
+        */
 
     }
 }
@@ -662,14 +692,6 @@ control DptpEgress(
         }
         default_action = nop();
     }
-
-    table timesync_clip_egts {
-        actions = {
-            timesync_do_clip_egts();
-        }
-        default_action = timesync_do_clip_egts();
-    }
-
 
     apply {
         if (eg_intr_md.pkt_length != 0) {
