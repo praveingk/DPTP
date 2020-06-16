@@ -117,7 +117,7 @@ using namespace dptp;
     // Get devMgr singleton instance
     auto &devMgr = bfrt::BfRtDevMgr::getInstance();
     // Get bfrtInfo object from dev_id and p4 program name
-    auto bf_status = devMgr.bfRtInfoGet(dev_tgt.dev_id, "dptp_v16", &bfrtInfo);
+    auto bf_status = devMgr.bfRtInfoGet(dev_tgt.dev_id, "dptp", &bfrtInfo);
     // Create a session object
     session = bfrt::BfRtSession::sessionCreate();
     printf("DPTP bfrt Setup!\n");

@@ -8,8 +8,8 @@ def setup_tofino1 ():
 
 
 def setup_virt_tofino2 ():
-    dptpIngress = bfrt.dptp_v16.pipe.DptpIngress
-    dptpEgress  = bfrt.dptp_v16.pipe.DptpEgress
+    dptpIngress = bfrt.dptp.pipe.DptpIngress
+    dptpEgress  = bfrt.dptp.pipe.DptpEgress
 
     dptpIngress.acl.add_with__drop(ingress_port=176, dstaddr=0xa0000010000a, ethertype=0x800)
     dptpIngress.acl.add_with__drop(ingress_port=160, dstaddr=0x100000000001, ethertype=0x800)
@@ -28,8 +28,8 @@ def setup_tofino2 ():
     # pd mac_forward add_entry set_egr ethernet_dstAddr 0x6cb3115309b2 action_egress_spec 147
     # pd mac_forward add_entry set_egr ethernet_dstAddr 0xa0000010000a action_egress_spec 160
     # pd mac_forward add_entry set_egr ethernet_dstAddr 0x100000000001 action_egress_spec 176
-    dptpIngress = bfrt.dptp_v16.pipe.DptpIngress
-    dptpEgress  = bfrt.dptp_v16.pipe.DptpEgress
+    dptpIngress = bfrt.dptp.pipe.DptpIngress
+    dptpEgress  = bfrt.dptp.pipe.DptpEgress
 
     # Ingress Tables
     dptpIngress.timesyncs2s_store_igTs_hi.set_default_with_timesyncs2s_capture_igTs_hi(switch_id=19)
