@@ -2,9 +2,9 @@
 # PROGNAME : Things to be changed according to program.
 # ARCH: vther it is tofinobm or tofino or bmv2.
 #
-PROGNAME := dptp_v16
+PROGNAME := dptp_main
 ARCH := tofino
-SOURCES := dptp_v16.cpp
+SOURCES := src/dptp.cpp src/dptp_main.cpp
 TOFINO_BUILD_DIR = /root/bf-sde-9.1.1/install
 TOFINO_SDE_INCLUDE := -I$(TOFINO_BUILD_DIR)/include
 TOFINO_LIBS := /usr/lib/x86_64-linux-gnu/libpthread.so \

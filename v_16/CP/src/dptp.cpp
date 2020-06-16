@@ -1,140 +1,7 @@
-/*
- * Control Plane program for Tofino-based Timesync program.
- * Compile using following command : make ARCH=Target[tofino|tofinobm]
- * To Execute, Run: ./dptp_topo_cp
- *
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <sched.h>
-#include <string.h>
-#include <time.h>
-#include <assert.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <pthread.h>
-#include <unistd.h>
-#include <pcap.h>
-#include <arpa/inet.h>
+#include "dptp.hpp"
 
-using namespace std;
-// #include <bfsys/bf_sal/bf_sys_intf.h>
-// #include <dvm/bf_drv_intf.h>
-// #include <lld/lld_reg_if.h>
-// #include <lld/lld_err.h>
-// #include <lld/bf_ts_if.h>
-// #include <knet_mgr/bf_knet_if.h>
-// #include <knet_mgr/bf_knet_ioctl.h>
-// #include <pkt_mgr/pkt_mgr_intf.h>
-// #include <tofino/pdfixed/pd_common.h>
-// #include <tofino/pdfixed/pd_conn_mgr.h>
+using namespace dptp;
 
-// #include <tofino/pdfixed/pd_common.h>
-// #include <tofino/pdfixed/pd_conn_mgr.h>
-// #include <port_mgr/bf_port_if.h>
-// #include <pipe_mgr/pipe_mgr_intf.h>
-// #include <bfsys/bf_sal/bf_sys_mem.h>
-
-#include <bf_rt/bf_rt_info.hpp>
-#include <bf_rt/bf_rt_init.hpp>
-#include <bf_rt/bf_rt_common.h>
-#include <bf_rt/bf_rt_table_key.hpp>
-#include <bf_rt/bf_rt_table_data.hpp>
-#include <bf_rt/bf_rt_table.hpp>
-
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-#include <bf_switchd/bf_switchd.h>
-#include <lld/bf_ts_if.h>
-#include <pkt_mgr/pkt_mgr_intf.h>
-#include <port_mgr/bf_port_if.h>
-#ifdef __cplusplus
-}
-#endif
-
-#define THRIFT_PORT_NUM 7777
-#define ALL_PIPES       0xffff
-#define MAX_SWITCHES    20
-int switchid = 0;
-
-// Bf_rt globals
-bf_rt_session_hdl *bf_session;
-const bf_rt_info_hdl *bf_rt_info;
-
-// Custom MAC address defined for switches
-uint8_t switch1[] = {0x10, 0x00, 0x00, 0x00, 0x00, 0x01};
-uint8_t  master[] = {0xa0, 0x00, 0x00, 0x10, 0x00, 0x0a};
-
-void init_bf_switchd() {
-  bf_switchd_context_t *switchd_main_ctx = NULL;
-  char *install_dir;
-  char target_conf_file[100];
-  bf_status_t bf_status;
-  install_dir = getenv("SDE_INSTALL");
-  sprintf(target_conf_file, "%s/share/p4/targets/tofino/dptp_v16.conf", install_dir);
-
-  /* Allocate memory to hold switchd configuration and state */
-  if ((switchd_main_ctx = (bf_switchd_context_t *)calloc(1, sizeof(bf_switchd_context_t))) == NULL) {
-    printf("ERROR: Failed to allocate memory for switchd context\n");
-    return;
-  }
-
-  memset(switchd_main_ctx, 0, sizeof(bf_switchd_context_t));
-  switchd_main_ctx->install_dir = install_dir;
-  switchd_main_ctx->conf_file = target_conf_file;
-  switchd_main_ctx->skip_p4 = false;
-  switchd_main_ctx->skip_port_add = false;
-  switchd_main_ctx->running_in_background = true;
-  switchd_main_ctx->dev_sts_thread = true;
-  switchd_main_ctx->dev_sts_port = THRIFT_PORT_NUM;
-
-  bf_status = bf_switchd_lib_init(switchd_main_ctx);
-  printf("Initialized bf_switchd, status = %d\n", bf_status);
-}
-
-void getSwitchName() {
-  char switchName[25];
-  FILE *f = fopen("/etc/hostname", "r");
-  fscanf(f, "%s", switchName);
-  if (strcmp(switchName, "tofino1") == 0) {
-    switchid = 1;
-  } else if (strcmp(switchName, "tofino2") == 0) {
-    switchid = 2;
-  }
-  printf("Detected running on Tofino%d\n", switchid);
-}
-
-void init_tables() {
-  char cwd[256];
-  char bfrtcommand[256];
-  if (getcwd(cwd, sizeof(cwd)) != NULL) {
-    printf("Current working dir: %s\n", cwd);
-  }
-  //printf("Current WD:%s\n", cwd);
-  sprintf(bfrtcommand, "bfshell -b %s/table-setup.py", cwd);
-  //printf("%s\n", bfrtcommand);
-  system(bfrtcommand);
-}
-
-void init_ports() {
-  if (switchid == 1) {
-    system("bfshell -f commands-ports-tofino1.txt");
-  }
-  else if (switchid == 2) {
-    system("bfshell -f commands-ports-tofino2.txt");
-  }
-}
-
-#define DPTP_GEN_REQ 0x11
-#define DPTP_CAPTURE_COMMAND 0x6
-
-namespace dptp
-{
   typedef struct __attribute__((__packed__)) dptp_t {
     uint8_t dstAddr[6];
     uint8_t srcAddr[6];
@@ -157,7 +24,7 @@ namespace dptp
   dptp_p dptp_followup_pkt;
   uint8_t *upkt;
   size_t sz = sizeof(dptp_p);
-  bf_pkt *bfpkt = NULL;
+  bf_pkt *bfpkt;
 
   // DPTP Request
   dptp_p dptp_request_pkt;
@@ -221,21 +88,43 @@ namespace dptp
   std::unique_ptr<bfrt::BfRtTableKey> reg_ts_lo_key;
   std::unique_ptr<bfrt::BfRtTableData> reg_ts_lo_data;
 
-  void setUp() {
+  // Custom MAC address defined for switches
+  uint8_t switch1[] = {0x10, 0x00, 0x00, 0x00, 0x00, 0x01};
+  uint8_t  master[] = {0xa0, 0x00, 0x00, 0x10, 0x00, 0x0a};
+
+  uint64_t s2s_reference_hi[MAX_SWITCHES];
+  uint64_t s2s_reference_lo[MAX_SWITCHES];
+  uint64_t s2s_macts_lo[MAX_SWITCHES];
+  uint64_t s2s_elapsed_hi[MAX_SWITCHES];
+  uint64_t s2s_elapsed_lo[MAX_SWITCHES];
+  uint64_t s2s_egts_lo[MAX_SWITCHES];
+  uint64_t now_macts_lo[MAX_SWITCHES];
+  uint64_t now_igts_hi[MAX_SWITCHES];
+  uint64_t now_igts_lo[MAX_SWITCHES];
+  uint64_t capture_req_tx[MAX_SWITCHES];
+  uint64_t capture_resp_tx[MAX_SWITCHES];
+
+  uint32_t s2s_reference_hi_d[MAX_SWITCHES];
+  uint32_t s2s_reference_lo_d[MAX_SWITCHES];
+  uint32_t now_igts_hi_d[MAX_SWITCHES];
+  uint32_t now_igts_lo_d[MAX_SWITCHES];
+  
+  uint32_t max_ns = 1000000000;
+
+  bf_status_t dptp::setUp(void) {
     dev_tgt.dev_id = 0;
     dev_tgt.pipe_id = ALL_PIPES;
     // Get devMgr singleton instance
     auto &devMgr = bfrt::BfRtDevMgr::getInstance();
     // Get bfrtInfo object from dev_id and p4 program name
     auto bf_status = devMgr.bfRtInfoGet(dev_tgt.dev_id, "dptp_v16", &bfrtInfo);
-    // Check for status
-    assert(bf_status == BF_SUCCESS);
     // Create a session object
     session = bfrt::BfRtSession::sessionCreate();
     printf("DPTP bfrt Setup!\n");
+    return bf_status;
   }
 
-  void initRegisterAPI() {
+  bf_status_t dptp::initRegisterAPI(void) {
     // ts_hi register
     bf_status = bfrtInfo->bfrtTableFromNameGet("ts_hi", &reg_ts_hi);
     assert(bf_status == BF_SUCCESS);
@@ -268,84 +157,10 @@ namespace dptp
     bf_status = reg_ts_lo_key->setValue(reg_ts_lo_index, 0);
     assert(bf_status == BF_SUCCESS);
     printf("Initialized register APIs\n");
+    return BF_SUCCESS;
   }
 
-  void readRegisterAPI() {
-    bf_status = reg_ts_hi->dataAllocate(&reg_ts_hi_data);
-
-    bf_status = reg_ts_hi->tableEntryGet(*session, dev_tgt, *(reg_ts_hi_key.get()), hwflag, reg_ts_hi_data.get());
-    assert(bf_status == BF_SUCCESS);
-
-    std::vector<uint64_t> ts_hi_val;
-    bf_status = reg_ts_hi_data->getValue(reg_ts_hi_f1, &ts_hi_val);
-    assert(bf_status == BF_SUCCESS);
-
-    printf("ts_hi content: %u\n", ts_hi_val[0]);
-
-    bf_status = reg_ts_lo->dataAllocate(&reg_ts_lo_data);
-
-    bf_status = reg_ts_lo->tableEntryGet(*session, dev_tgt, *(reg_ts_lo_key.get()), hwflag, reg_ts_lo_data.get());
-    assert(bf_status == BF_SUCCESS);
-    std::vector<uint64_t> ts_lo_val;
-    bf_status = reg_ts_lo_data->getValue(reg_ts_lo_f1, &ts_lo_val);
-    assert(bf_status == BF_SUCCESS);
-
-    printf("ts_lo content: %u\n", ts_lo_val[0]);
-  }
-
-  void writeRegisterAPI() {
-    bf_status = reg_ts_hi->dataAllocate(&reg_ts_hi_data);
-
-    // Try to write a register
-    uint64_t idx = 0;
-    const uint64_t val = 111;
-
-    bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, idx);
-    assert(bf_status == BF_SUCCESS);
-    bf_status = reg_ts_hi_data->setValue(reg_ts_hi_f1, val);
-    assert(bf_status == BF_SUCCESS);
-
-    bf_status = session->beginTransaction(false);
-
-    bf_status = reg_ts_hi->tableEntryAdd(*session, dev_tgt, *reg_ts_hi_key, *reg_ts_hi_data);
-    assert(bf_status == BF_SUCCESS);
-
-    bf_status = session->verifyTransaction();
-    bf_status = session->sessionCompleteOperations();
-    bf_status = session->commitTransaction(true);
-  }
-
-  void initReferenceTsAPI () {
-    bf_status = reg_ts_hi->keyAllocate(&reg_ts_hi_key);
-    bf_status = reg_ts_hi->dataAllocate(&reg_ts_hi_data);
-    bf_status = reg_ts_lo->keyAllocate(&reg_ts_lo_key);
-    bf_status = reg_ts_lo->dataAllocate(&reg_ts_lo_data);    
-    assert(bf_status == BF_SUCCESS);
-  }
-  void readReferenceTs(uint32_t *ts_hi, uint32_t *ts_lo, uint8_t switch_id) {
-    bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, (uint64_t)switch_id);
-    bf_status = reg_ts_lo_key->setValue(reg_ts_lo_index, (uint64_t)switch_id);
-
-    bf_status = reg_ts_hi->tableEntryGet(*session, dev_tgt, *(reg_ts_hi_key.get()), hwflag, reg_ts_hi_data.get());
-    assert(bf_status == BF_SUCCESS);
-
-    std::vector<uint64_t> ts_hi_val;
-    bf_status = reg_ts_hi_data->getValue(reg_ts_hi_f1, &ts_hi_val);
-    assert(bf_status == BF_SUCCESS);
-
-    bf_status = reg_ts_lo->tableEntryGet(*session, dev_tgt, *(reg_ts_lo_key.get()), hwflag, reg_ts_lo_data.get());
-    assert(bf_status == BF_SUCCESS);
-    std::vector<uint64_t> ts_lo_val;
-    bf_status = reg_ts_lo_data->getValue(reg_ts_lo_f1, &ts_lo_val);
-    assert(bf_status == BF_SUCCESS);
-
-    *ts_hi = (uint32_t)ts_hi_val[0];
-    *ts_lo = (uint32_t)ts_lo_val[0];
-    printf("ts_hi content: %u\n", *ts_hi);
-    printf("ts_lo content: %u\n", *ts_lo);
-  }
-
-  void writeReferenceTs (const uint64_t ts_hi, const uint64_t ts_lo, uint64_t switch_id) {
+  bf_status_t dptp::writeReferenceTs (const uint64_t ts_hi, const uint64_t ts_lo, uint64_t switch_id) {
     bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, switch_id);
     assert(bf_status == BF_SUCCESS);
     bf_status = reg_ts_hi_data->setValue(reg_ts_hi_f1, ts_hi);
@@ -365,13 +180,15 @@ namespace dptp
     bf_status = session->verifyTransaction();
     bf_status = session->sessionCompleteOperations();
     bf_status = session->commitTransaction(true);
+    return BF_SUCCESS;
   }
+
 
   /* Sets the global 64-bit Reference Time of master.
      The reference is stored in reference_ts_lo[0] and reference_ts_hi[0]
      Currently uses the CPU clock time as global Time 
    */ 
-  void initReferenceTs () {
+  bf_status_t dptp::initReferenceTs (void) {
     struct timespec tsp;
     int max_ns = 1000000000;
     uint64_t max_ns_32 = 4294967296;
@@ -408,14 +225,15 @@ namespace dptp
     // printf("Setting Time tv_sec = %u, tv_nsec = %u\n", ts_sec, ts_nsec);
     // time_r = ((time_r | ts_sec) << 32) | ts_nsec;
     // printf("***** Done ****\n");
+    return BF_SUCCESS;
   }
 
-  void incrementEra () {
+  bf_status_t dptp::incrementEra () {
     // ts_hi needs to incremented by 0x10000 (65536)
+    return BF_SUCCESS;
   }
-
   /* Monitor global_ts, and check for wrap over for era maintenance */
-  void *eraMaintenance (void *args) {
+  void* dptp::eraMaintenance (void *args) {
     bf_status_t status;
     uint64_t global_ts_ns_old;
     uint64_t global_ts_ns_new;
@@ -433,7 +251,46 @@ namespace dptp
     }
   }
   
-  void* sendDptpRequests (void *args) {
+  bf_status_t dptp::createEraThread (void) {
+    // Thread to monitor the Global Timestamp for wrap over, and increment Era
+    pthread_create(&era_thread, NULL, eraMaintenance, NULL);
+    return BF_SUCCESS;
+  }
+
+  bf_status_t dptp::initReferenceTsAPI () {
+    bf_status = reg_ts_hi->keyAllocate(&reg_ts_hi_key);
+    bf_status = reg_ts_hi->dataAllocate(&reg_ts_hi_data);
+    bf_status = reg_ts_lo->keyAllocate(&reg_ts_lo_key);
+    bf_status = reg_ts_lo->dataAllocate(&reg_ts_lo_data);    
+    assert(bf_status == BF_SUCCESS);
+    return BF_SUCCESS;
+  }
+
+  bf_status_t dptp::readReferenceTs(uint32_t *ts_hi, uint32_t *ts_lo, uint8_t switch_id) {
+    bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, (uint64_t)switch_id);
+    bf_status = reg_ts_lo_key->setValue(reg_ts_lo_index, (uint64_t)switch_id);
+
+    bf_status = reg_ts_hi->tableEntryGet(*session, dev_tgt, *(reg_ts_hi_key.get()), hwflag, reg_ts_hi_data.get());
+    assert(bf_status == BF_SUCCESS);
+
+    std::vector<uint64_t> ts_hi_val;
+    bf_status = reg_ts_hi_data->getValue(reg_ts_hi_f1, &ts_hi_val);
+    assert(bf_status == BF_SUCCESS);
+
+    bf_status = reg_ts_lo->tableEntryGet(*session, dev_tgt, *(reg_ts_lo_key.get()), hwflag, reg_ts_lo_data.get());
+    assert(bf_status == BF_SUCCESS);
+    std::vector<uint64_t> ts_lo_val;
+    bf_status = reg_ts_lo_data->getValue(reg_ts_lo_f1, &ts_lo_val);
+    assert(bf_status == BF_SUCCESS);
+
+    *ts_hi = (uint32_t)ts_hi_val[0];
+    *ts_lo = (uint32_t)ts_lo_val[0];
+    printf("ts_hi content: %u\n", *ts_hi);
+    printf("ts_lo content: %u\n", *ts_lo);
+    return BF_SUCCESS;
+  }
+
+  void* dptp::sendDptpRequests (void *args) {
     int i=0;
     sleep(3); // Initial packets are lost somehow.
     while (1) {
@@ -445,41 +302,18 @@ namespace dptp
       usleep(1000000);
       i++;
     }
-}
-  void createEraThread () {
-    // Thread to monitor the Global Timestamp for wrap over, and increment Era
-    pthread_create(&era_thread, NULL, eraMaintenance, NULL);
-  }
+  }  
 
-  void createDptpRequestThread () {
+
+  void dptp::createDptpRequestThread (void) {
     pthread_create(&dptp_thread, NULL, sendDptpRequests, NULL);
   }
-  
 
-  void waitOnThreads () {
+  void dptp::waitOnThreads (void) {
     pthread_join(era_thread, NULL);
   }
 
-  static bf_status_t txComplete(bf_dev_id_t device,
-                                                  bf_pkt_tx_ring_t tx_ring,
-                                                  uint64_t tx_cookie,
-                                                  uint32_t status) {
-    //bf_pkt *pkt = (bf_pkt *)(uintptr_t)tx_cookie;
-    //bf_pkt_free(device, pkt);
-    return BF_SUCCESS;
-  }
-
-  void callbackRegister (bf_dev_id_t device) {
-    int tx_ring;
-    /* register callback for TX complete */
-    for (tx_ring = BF_PKT_TX_RING_0; tx_ring < BF_PKT_TX_RING_MAX; tx_ring++) {
-      bf_pkt_tx_done_notif_register(
-          device, txComplete, (bf_pkt_tx_ring_t)tx_ring);
-    }
-  }
-
-
-  void initRequestPkt() {
+  bf_status_t dptp::initRequestPkt(void) {
     int i=0;
     int cookie;
     if (bf_pkt_alloc(0, &bfDptpPkt, dptp_sz, BF_DMA_CPU_PKT_TRANSMIT_1) != 0) {
@@ -506,7 +340,7 @@ namespace dptp
     // printf("\n");
   }
 
-  void initFollowupPkt() {
+  bf_status_t dptp::initFollowupPkt(void) {
     int i=0;
     int cookie;
     if (bf_pkt_alloc(0, &bfpkt, sz, BF_DMA_CPU_PKT_TRANSMIT_0) != 0) {
@@ -535,12 +369,12 @@ namespace dptp
 
   }
 
-  void initPackets () {
+  bf_status_t dptp::initPackets () {
     initRequestPkt();
     initFollowupPkt();
   }
 
-  void sendFollowupPacket(uint8_t *dstAddr, uint32_t tx_capture_tstamp_lo) {
+  bf_status_t dptp::sendFollowupPacket(uint8_t *dstAddr, uint32_t tx_capture_tstamp_lo) {
     memcpy(dptp_followup_pkt.dstAddr, dstAddr, 6);//{0x3c, 0xfd,0xfe, 0xb7, 0xe7, 0xf4}
     dptp_followup_pkt.reference_ts_hi = htonl(tx_capture_tstamp_lo);
     memcpy(upkt, &dptp_followup_pkt, sz);
@@ -553,6 +387,7 @@ namespace dptp
     } else {
       printf("Packet sent successfully capture_tx=%x\n", htonl(tx_capture_tstamp_lo));
     }
+    return BF_SUCCESS;
   }
 
   bf_status_t followupDigestCallback(const bf_rt_target_t &bf_rt_tgt,
@@ -590,33 +425,14 @@ namespace dptp
     assert(bf_status == BF_SUCCESS);
     return BF_SUCCESS;
   }
-  uint64_t s2s_reference_hi[MAX_SWITCHES];
-  uint64_t s2s_reference_lo[MAX_SWITCHES];
-  uint64_t s2s_macts_lo[MAX_SWITCHES];
-  uint64_t s2s_elapsed_hi[MAX_SWITCHES];
-  uint64_t s2s_elapsed_lo[MAX_SWITCHES];
-  uint64_t s2s_egts_lo[MAX_SWITCHES];
-  uint64_t now_macts_lo[MAX_SWITCHES];
-  uint64_t now_igts_hi[MAX_SWITCHES];
-  uint64_t now_igts_lo[MAX_SWITCHES];
-  uint64_t capture_req_tx[MAX_SWITCHES];
-  uint64_t capture_resp_tx[MAX_SWITCHES];
 
-  uint32_t s2s_reference_hi_d[MAX_SWITCHES];
-  uint32_t s2s_reference_lo_d[MAX_SWITCHES];
-  uint32_t now_igts_hi_d[MAX_SWITCHES];
-  uint32_t now_igts_lo_d[MAX_SWITCHES];
-  
-  
-
-  uint32_t max_ns = 1000000000;
-  bf_status_t replyDigestCallback(const bf_rt_target_t &bf_rt_tgt,
+  bf_status_t dptp::replyDigestCallback(const bf_rt_target_t &bf_rt_tgt,
                             const std::shared_ptr<bfrt::BfRtSession> bfrtsession,
                             std::vector<std::unique_ptr<bfrt::BfRtLearnData>> vec,
                             bf_rt_learn_msg_hdl *const learn_msg_hdl,
                             const void *cookie) {
     uint8_t switch_id = 0;
-	  bf_dev_port_t reqport = 160;
+	bf_dev_port_t reqport = 160;
     int i= 0;
     int ts_id;
     bool ts_valid;
@@ -635,7 +451,7 @@ namespace dptp
         default:
           printf("Unexpected Case!\n");
           return BF_UNEXPECTED;
-		  }
+	  }
       bf_port_1588_timestamp_tx_get((bf_dev_id_t) 0, reqport, &capture_req_tx[switch_id], &ts_valid, &ts_id);
       vec[i].get()->getValue(learn_reference_ts_hi, &s2s_reference_hi[switch_id]);          
       vec[i].get()->getValue(learn_reference_ts_lo, &s2s_reference_lo[switch_id]);          
@@ -652,8 +468,8 @@ namespace dptp
       uint32_t b = reference_ts_c % max_ns;
       s2s_reference_hi_d[switch_id] = a;
       s2s_reference_lo_d[switch_id] = b;
-  		uint64_t now_igts_c = 0;
-		  now_igts_c = ((now_igts_c | now_igts_hi[switch_id]) << 32) | now_igts_lo[switch_id];
+  	  uint64_t now_igts_c = 0;
+	  now_igts_c = ((now_igts_c | now_igts_hi[switch_id]) << 32) | now_igts_lo[switch_id];
       a = now_igts_c / max_ns;
       b = now_igts_c % max_ns;
       now_igts_hi_d[switch_id] = a;
@@ -662,7 +478,6 @@ namespace dptp
       printf("Reference_hi   = %u, Reference_lo   =%u\n", s2s_reference_hi[switch_id], s2s_reference_lo[switch_id]);
       printf("Reference TS   = %lu\n", reference_ts_c);
       printf("Reference_hi_d = %u, Reference_lo_d =%u\n", s2s_reference_hi_d[switch_id], s2s_reference_lo_d[switch_id]);
-
       printf("capture_req_tx = %u\n", (capture_req_tx[switch_id] & 0xFFFFFFFF));
       printf("s2s_macts_lo   = %u\n", s2s_macts_lo[switch_id]);
       printf("s2s_elapsed_hi = %u, s2s_elapsed_lo = %u\n", s2s_elapsed_hi[switch_id], s2s_elapsed_lo[switch_id]);
@@ -682,7 +497,7 @@ namespace dptp
 
 
 
-  void writeCalcRefTs (uint32_t calc_time_hi_dptp, 
+  bf_status_t dptp::writeCalcRefTs (uint32_t calc_time_hi_dptp, 
                        uint32_t calc_time_lo_dptp, 
                        uint32_t now_elapsed_hi, 
                        uint32_t now_elapsed_lo,
@@ -701,7 +516,7 @@ namespace dptp
     writeReferenceTs(ref_calc_time_hi, ref_calc_time_lo, (uint64_t)switch_id);           
   }
 
-  void reportDptpError (uint32_t calc_time_hi, 
+  bf_status_t dptp::reportDptpError (uint32_t calc_time_hi, 
                         uint32_t calc_time_lo,                       
                         uint32_t now_elapsed_hi, 
                         uint32_t now_elapsed_lo, 
@@ -730,7 +545,7 @@ namespace dptp
     printf("-------------------------------------------------\n");
   }
 
-  bf_status_t replyFollowupDigestCallback(const bf_rt_target_t &bf_rt_tgt,
+  bf_status_t dptp::replyFollowupDigestCallback(const bf_rt_target_t &bf_rt_tgt,
                             const std::shared_ptr<bfrt::BfRtSession> bfrtsession,
                             std::vector<std::unique_ptr<bfrt::BfRtLearnData>> vec,
                             bf_rt_learn_msg_hdl *const learn_msg_hdl,
@@ -792,7 +607,7 @@ namespace dptp
     return BF_SUCCESS;
   }
 
-  void registerDigest () {
+  bf_status_t dptp::registerDigest (void) {
     bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpIngressDeparser.dptp_followup_digest", &bfrtLearnFollowup);
     assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnFollowup->learnFieldIdGet("egress_port", &learn_egress_port);
@@ -838,29 +653,3 @@ namespace dptp
     bf_status = bfrtLearnReplyFop->bfRtLearnCallbackRegister(session, dev_tgt, replyFollowupDigestCallback, nullptr);
     assert(bf_status == BF_SUCCESS);
   }
-
-
-} // namespace dptp
-
-int main(int argc, char **argv) {
-  // Start the BF Switchd
-  init_bf_switchd();
-  // Initialize the switch ports and data-plane MATs
-  getSwitchName();
-  init_ports();
-  init_tables();
-  printf("Starting dptp_topo Control Plane Unit ..\n");
-  dptp::setUp();
-  dptp::initRegisterAPI();
-
-  dptp::initReferenceTs();
-  dptp::createEraThread();
-
-  dptp::callbackRegister(0);
-
-  dptp::initPackets();
-  dptp::registerDigest();
-  dptp::createDptpRequestThread();
-  dptp::waitOnThreads();
-  return 0;
-}

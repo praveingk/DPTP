@@ -33,10 +33,8 @@ def setup_tofino2 ():
 
     # Ingress Tables
     dptpIngress.timesyncs2s_store_igTs_hi.set_default_with_timesyncs2s_capture_igTs_hi(switch_id=19)
-    #dptpIngress.timesyncs2s_store_igTs_lo.set_default_with_timesyncs2s_capture_igTs_lo(switch_id=19)
 
     dptpIngress.timesyncs2s_store_igTs_hi.add_with_timesyncs2s_capture_igTs_hi(mdata_command=0x13, mdata_switch_id=0x1, switch_id=0x1)
-    #dptpIngress.timesyncs2s_store_igTs_lo.add_with_timesyncs2s_capture_igTs_lo(mdata_command=0x13, mdata_switch_id=0x1, switch_id=0x1)
 
     dptpIngress.dptp_now.dptp_handle_overflow.add_with_nop(dptp_compare_residue=0)
 
@@ -59,19 +57,12 @@ def setup_tofino2 ():
     dptpIngress.qos.add_with_do_qos(command=0x6)
     dptpIngress.qos.add_with_do_qos(command=0x12)
 
-    #dptpIngress.timesyncs2s_store_capture_tx.add_with_do_timesyncs2s_capture_tx_set(switch_id=0x1)
 
     # Egress Tables
     dptpEgress.calc_current_utilization.add_with_do_calc_current_utilization(ingress_port=0x80, link=0x80)
     dptpEgress.calc_current_utilization.add_with_do_calc_current_utilization(ingress_port=0x81, link=0x81)
     dptpEgress.calc_current_utilization.add_with_do_calc_current_utilization(ingress_port=0x82, link=0x82)
     dptpEgress.calc_current_utilization.add_with_do_calc_current_utilization(ingress_port=0x83, link=0x83)
-
-    # dptpEgress.timesyncs2s_gen_request.add_with_timesyncs2s_request(switch_id=0)
-    # dptpEgress.timesyncs2s_gen_request.add_with_timesyncs2s_request(switch_id=1)
-
-    # dptpEgress.timesyncs2s_gen_response.add_with_timesyncs2s_response(switch_id=0)
-    # dptpEgress.timesyncs2s_gen_response.add_with_timesyncs2s_response(switch_id=1)
 
     dptpEgress.dptp_capture_tx.add_with_do_dptp_capture_tx(command=0x12)
     dptpEgress.dptp_capture_tx.add_with_do_dptp_capture_tx(command=0x11)
