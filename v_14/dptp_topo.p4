@@ -154,6 +154,7 @@ header_type metadata_t {
         dptp_compare_residue : 32;
         dptp_overflow : 1;
         dptp_overflow_compare : 32;
+        egress_port : 16;
     }
 }
 
@@ -199,35 +200,36 @@ parser parse_ipv4 {
 /** Registers ***/
 
 field_list timesync_inform_cp_digest {
-    ig_intr_md_for_tm.ucast_egress_port;
+    //ig_intr_md_for_tm.ucast_egress_port;
+    mdata.egress_port;
     ethernet.dstAddr;
-    ig_intr_md_from_parser_aux.ingress_global_tstamp;
+    //ig_intr_md_from_parser_aux.ingress_global_tstamp;
 }
 
-register reference_ts_hi {
+register ts_hi {
     width: 32;
     instance_count: MAX_SWITCHES;
 }
-blackbox stateful_alu reference_ts_hi_set {
-    reg: reference_ts_hi;
+blackbox stateful_alu ts_hi_set {
+    reg: ts_hi;
     update_lo_1_value: mdata.reference_ts_hi;
 }
-blackbox stateful_alu reference_ts_hi_get {
-    reg: reference_ts_hi;
+blackbox stateful_alu ts_hi_get {
+    reg: ts_hi;
     output_value: register_lo;
     output_dst: mdata.reference_ts_hi;
 }
 
-register reference_ts_lo {
+register ts_lo {
     width: 32;
     instance_count: MAX_SWITCHES;
 }
-blackbox stateful_alu reference_ts_lo_set {
-    reg: reference_ts_lo;
+blackbox stateful_alu ts_lo_set {
+    reg: ts_lo;
     update_lo_1_value: mdata.reference_ts_lo;
 }
-blackbox stateful_alu reference_ts_lo_get {
-    reg: reference_ts_lo;
+blackbox stateful_alu ts_lo_get {
+    reg: ts_lo;
     output_value: register_lo;
     output_dst: mdata.reference_ts_lo;
 }
@@ -313,16 +315,6 @@ blackbox stateful_alu timesyncs2s_reference_lo_set {
     update_lo_1_value: timesync.reference_ts_lo;
 }
 
-register timesyncs2s_elapsed_hi {
-    width:16;
-    instance_count:MAX_SWITCHES;
-}
-@pragma stateful_field_slice timesync.igts 47 32
-blackbox stateful_alu timesyncs2s_elapsed_hi_set {
-    reg:timesyncs2s_elapsed_hi;
-    update_lo_1_value: timesync.igts;
-}
-
 register timesyncs2s_elapsed_lo {
     width:32;
     instance_count:MAX_SWITCHES;
@@ -337,6 +329,7 @@ register timesyncs2s_igts_hi {
     width:16;
     instance_count:MAX_SWITCHES;
 }
+
 @pragma stateful_field_slice ig_intr_md_from_parser_aux.ingress_global_tstamp 47 32
 blackbox stateful_alu timesyncs2s_igts_hi_set {
     reg:timesyncs2s_igts_hi;
@@ -344,6 +337,7 @@ blackbox stateful_alu timesyncs2s_igts_hi_set {
     output_value:alu_lo;
     output_dst:mdata.ingress_timestamp_clipped_hi;
 }
+
 
 register timesyncs2s_igts_lo {
     width:32;
@@ -356,7 +350,6 @@ blackbox stateful_alu timesyncs2s_igts_lo_set {
     output_value:alu_lo;
     output_dst:mdata.ingress_timestamp_clipped;
 }
-
 register timesyncs2s_reqigts_hi {
     width:16;
     instance_count:MAX_SWITCHES;
@@ -379,16 +372,6 @@ blackbox stateful_alu timesyncs2s_reqigts_lo_set {
     output_dst:mdata.ingress_timestamp_clipped;
 }
 
-register timesyncs2s_macts_hi {
-    width:16;
-    instance_count:MAX_SWITCHES;
-}
-@pragma stateful_field_slice timesync.igmacts 47 32
-blackbox stateful_alu timesyncs2s_macts_hi_set {
-    reg:timesyncs2s_macts_hi;
-    update_lo_1_value: timesync.igmacts;
-}
-
 register timesyncs2s_macts_lo {
     width:32;
     instance_count:MAX_SWITCHES;
@@ -397,16 +380,6 @@ register timesyncs2s_macts_lo {
 blackbox stateful_alu timesyncs2s_macts_lo_set {
     reg:timesyncs2s_macts_lo;
     update_lo_1_value: timesync.igmacts;
-}
-
-register timesyncs2s_now_macts_hi {
-    width:16;
-    instance_count:MAX_SWITCHES;
-}
-@pragma stateful_field_slice ig_intr_md.ingress_mac_tstamp 47 32
-blackbox stateful_alu timesyncs2s_now_macts_hi_set {
-    reg:timesyncs2s_now_macts_hi;
-    update_lo_1_value: ig_intr_md.ingress_mac_tstamp ;
 }
 
 register timesyncs2s_now_macts_lo {
@@ -562,23 +535,13 @@ action do_store_current_utilization () {
 
 
 action timesync_hi_request() {
-   reference_ts_hi_get.execute_stateful_alu(mdata.switch_id);
-   //modify_field(timesync.command, COMMAND_TIMESYNC_RESPONSE);
-   // modify_field(ethernet.dstAddr, ethernet.srcAddr);
-   // modify_field(ethernet.srcAddr, 0x0000000011);
-}
-
-action dptp_now_hi_request() {
-   reference_ts_hi_get.execute_stateful_alu(mdata.switch_id);
+    ts_hi_get.execute_stateful_alu(mdata.switch_id);
 }
 
 action timesync_request() {
-    reference_ts_lo_get.execute_stateful_alu(mdata.switch_id);
+    ts_lo_get.execute_stateful_alu(mdata.switch_id);
 }
 
-action dptp_now_request() {
-    reference_ts_lo_get.execute_stateful_alu(mdata.switch_id);
-}
 action reverse_packet() {
     /* Flip the src and dst mac */
     modify_field(ethernet.dstAddr, ethernet.srcAddr);
@@ -610,17 +573,6 @@ action timesync_add_era() {
 }
 
 
-action forward(newSrcMAC, newDstMAC, egress_spec) {
-    // 1. Set the egress port of the next hop
-    modify_field(ig_intr_md_for_tm.ucast_egress_port, egress_spec);
-    // 2. Update the ethernet destination address with the address of the next hop.
-    modify_field(ethernet.dstAddr, newDstMAC);
-    // 3. Update the ethernet source address with the address of the switch.
-    modify_field(ethernet.srcAddr, newSrcMAC);
-    // 4. Decrement the TTL
-    add_to_field(ipv4.ttl, -1);
-}
-
 action do_timesyncs2s_capture_tx_set () {
     timesyncs2s_capture_tx_set.execute_stateful_alu(mdata.switch_id);
 }
@@ -638,11 +590,11 @@ action timesyncs2s_capture_elapsed_lo() {
 }
 
 
-action timesyncs2s_capture_igTs_hi(switch_id) {
+action timesyncs2s_capture_igTs_hi (switch_id) {
     timesyncs2s_igts_hi_set.execute_stateful_alu(switch_id);
 }
 
-action timesyncs2s_capture_igTs_lo(switch_id) {
+action timesyncs2s_capture_igTs_lo (switch_id) {
     timesyncs2s_igts_lo_set.execute_stateful_alu(switch_id);
 }
 
@@ -674,6 +626,7 @@ action do_qos() {
 
 action set_egr(egress_spec) {
     modify_field(ig_intr_md_for_tm.ucast_egress_port, egress_spec);
+    modify_field(mdata.egress_port, egress_spec);
 }
 
 action copy_metadata () {
@@ -740,13 +693,14 @@ table store_current_utilization {
     actions {
         do_store_current_utilization;
     }
+    default_action : do_store_current_utilization;
 }
 
 table timesync_delta {
     actions {
         timesync_calculate_egdelta;
     }
-    size:1;
+    default_action : timesync_calculate_egdelta;
 }
 
 
@@ -756,7 +710,9 @@ table timesyncs2s_gen_request {
     }
     actions {
         timesyncs2s_request;
+        nop;
     }
+    default_action : nop;
 }
 
 table timesyncs2s_gen_response {
@@ -765,13 +721,16 @@ table timesyncs2s_gen_response {
     }
     actions {
         timesyncs2s_response;
+        nop;
     }
+    default_action : nop;
 }
 
 table timesync_gen_response {
     actions {
         timesync_response;
     }
+    default_action : timesync_response;
 }
 
 table timesync_capture_ts {
@@ -782,6 +741,7 @@ table timesync_capture_ts {
         timesync_capture_tx;
         nop;
     }
+    default_action : nop;
 }
 
 table timesync_inform_cp {
@@ -792,12 +752,14 @@ table timesync_inform_cp {
         timesync_flag_cp_learn;
         nop;
     }
+    default_action : nop;
 }
 
 table timesync_current_rate {
     actions {
         do_timesync_current_rate;
     }
+    default_action : do_timesync_current_rate;
 }
 
 table calc_current_utilization {
@@ -806,24 +768,29 @@ table calc_current_utilization {
     }
     actions {
         do_calc_current_utilization;
+        nop;
     }
+    default_action : nop;
 }
 
 table copy_meta {
     actions {
         copy_metadata;
     }
+    default_action : copy_metadata;
 }
 table timesync_hi_now {
     actions {
         timesync_hi_request;
     }
+    default_action : timesync_hi_request;
 }
 
 table timesync_now {
     actions {
         timesync_request;
     }
+    default_action : timesync_request;
 }
 table copy_dptp_packet {
     reads {
@@ -833,6 +800,7 @@ table copy_dptp_packet {
         dptp_packet;
         nop;
     }
+    default_action : nop;
 }
 
 
@@ -840,41 +808,48 @@ table timesync_era_lo_get {
     actions {
         timesync_get_era_lo;
     }
+    default_action : timesync_get_era_lo;
 }
 
 table timesync_era_hi_get {
     actions {
         timesync_get_era_hi;
     }
+    default_action : timesync_get_era_hi;
 }
 
 table timesync_clip_ts {
     actions {
         timesync_do_clip_ts;
     }
+    default_action : timesync_do_clip_ts;
 }
 
 table timesync_clip_egts {
     actions {
         timesync_do_clip_egts;
     }
+    default_action : timesync_do_clip_egts;
 }
 table timesync_add_era_ts {
     actions {
         timesync_add_era;
     }
+    default_action : timesync_add_era;
 }
 
 table timesyncs2s_store_reference_hi {
     actions {
         timesyncs2s_capture_reference_hi;
     }
+    default_action : timesyncs2s_capture_reference_hi;
 }
 
 table timesyncs2s_store_reference_lo {
     actions {
         timesyncs2s_capture_reference_lo;
     }
+    default_action : timesyncs2s_capture_reference_lo;
 }
 table timesyncs2s_store_capture_tx {
     reads {
@@ -884,12 +859,14 @@ table timesyncs2s_store_capture_tx {
         do_timesyncs2s_capture_tx_set;
         nop;
     }
+    default_action : nop;
 }
 
 table timesyncs2s_store_elapsed_lo {
     actions {
         timesyncs2s_capture_elapsed_lo;
     }
+    default_action : timesyncs2s_capture_elapsed_lo;
 }
 
 table timesyncs2s_store_igTs_hi {
@@ -899,6 +876,7 @@ table timesyncs2s_store_igTs_hi {
     }
     actions {
         timesyncs2s_capture_igTs_hi;
+        nop;
     }
 }
 
@@ -909,6 +887,7 @@ table timesyncs2s_store_igTs_lo {
     }
     actions {
         timesyncs2s_capture_igTs_lo;
+        nop;
     }
 }
 
@@ -917,12 +896,14 @@ table timesyncs2s_store_now_macTs_lo {
     actions {
         timesyncs2s_capture_now_macTs_lo;
     }
+    default_action : timesyncs2s_capture_now_macTs_lo;
 }
 
 table timesyncs2s_store_macTs_lo {
     actions {
         timesyncs2s_capture_macTs_lo;
     }
+    default_action : timesyncs2s_capture_macTs_lo;
 }
 
 
@@ -930,14 +911,16 @@ table timesyncs2s_store_egTs_lo {
     actions {
         timesyncs2s_capture_egTs_lo;
     }
+    default_action : timesyncs2s_capture_egTs_lo;
 }
 
 table timesyncs2s_store_updTs_lo {
     actions {
         timesyncs2s_capture_updTs_lo;
     }
+    default_action : timesyncs2s_capture_updTs_lo;
 }
-@pragma stage 10
+//@pragma stage 10
 table timesyncs2s_inform_cp {
     actions {
         timesyncs2s_flag_cp;
@@ -953,6 +936,7 @@ table timesyncs2s_inform_cp_diff {
         timesyncs2s_flag_cp;
         nop;
     }
+    default_action : nop;
 }
 
 table qos {
@@ -963,6 +947,7 @@ table qos {
         do_qos;
         nop;
     }
+    default_action : nop;
 }
 
 table flip_address {
@@ -973,6 +958,7 @@ table flip_address {
         reverse_packet;
         nop;
     }
+    default_action : nop;
 }
 action _drop() {
     drop();
@@ -996,6 +982,7 @@ table acl {
         _drop;
         nop;
     }
+    default_action : nop;
 }
 
 table classify_logical_switch {
@@ -1007,6 +994,7 @@ table classify_logical_switch {
         classify_switch;
         nop;
     }
+    default_action : nop;
 }
 
 table classify_src_logical_switch {
@@ -1018,36 +1006,42 @@ table classify_src_logical_switch {
         classify_src_switch;
         nop;
     }
+    default_action : nop;
 }
 
 table dptp_add_elapsed_hi {
     actions {
         do_dptp_add_elapsed_hi;
     }
+    default_action : do_dptp_add_elapsed_hi;
 }
 
 table dptp_add_elapsed_lo {
     actions {
         do_dptp_add_elapsed_lo;
     }
+    default_action : do_dptp_add_elapsed_lo;
 }
 
 table dptp_store_now_hi {
     actions {
         do_dptp_store_now_hi;
     }
+    default_action : do_dptp_store_now_hi;
 }
 
 table dptp_store_now_lo {
     actions {
         do_dptp_store_now_lo;
     }
+    default_action : do_dptp_store_now_lo;
 }
 
 table dptp_overflow {
     actions {
         do_dptp_overflow;
     }
+    default_action : do_dptp_overflow;
 }
 
 table dptp_handle_overflow {
@@ -1058,24 +1052,28 @@ table dptp_handle_overflow {
         do_dptp_handle_overflow;
         nop;
     }
+    default_action : nop;
 }
 
 table dptp_calc_residue {
     actions {
         do_dptp_calc_residue;
     }
+    default_action : do_dptp_calc_residue;
 }
 
 table dptp_compare_residue {
     actions {
         do_dptp_compare_residue;
     }
+    default_action : do_dptp_compare_residue;
 }
 
 table dptp_compare_igts {
     actions {
         do_dptp_compare_igts;
     }
+    default_action : do_dptp_compare_igts;
 }
 control dptp_get_ref {
     //1. Get Reference
@@ -1092,6 +1090,50 @@ table mac_forward {
         nop;
     }
     size:20;
+    default_action : nop;
+}
+
+register reg_hi {
+    width:16;
+    instance_count:1;
+}
+
+@pragma stateful_field_slice ethernet.srcAddr 47 32
+blackbox stateful_alu write_reg_hi {
+    reg:reg_hi;
+    update_lo_1_value:ethernet.srcAddr;
+}
+
+register reg_lo {
+    width:32;
+    instance_count:1;
+}
+@pragma stateful_field_slice ethernet.srAddr 31 0
+blackbox stateful_alu write_reg_lo {
+    reg:reg_lo;
+    update_lo_1_value:ethernet.srcAddr;
+}
+
+action do_write_reg_hi () {
+    write_reg_hi.execute_stateful_alu(0);
+}
+
+action do_write_reg_lo () {
+    write_reg_lo.execute_stateful_alu(0);
+}
+
+table set_reg_hi {
+    actions {
+        do_write_reg_hi;
+    }
+    default_action : do_write_reg_hi;
+}
+
+table set_reg_lo {
+    actions {
+        do_write_reg_lo;
+    }
+    default_action : do_write_reg_lo;
 }
 
 control ingress {
@@ -1102,6 +1144,8 @@ control ingress {
         apply(classify_src_logical_switch);
         apply(flip_address);
     }
+    apply(set_reg_hi);
+    apply(set_reg_lo);
     // Store current ingress time for DPTP Request.
     apply(timesyncs2s_store_igTs_hi);
     apply(timesyncs2s_store_igTs_lo);
@@ -1126,14 +1170,12 @@ control ingress {
         apply(timesyncs2s_store_macTs_lo);
         apply(timesyncs2s_store_egTs_lo);
         apply(timesyncs2s_store_updTs_lo);
-        //apply(timesyncs2s_inform_cp);
         apply(dropit);
     } else if (mdata.command == COMMAND_TIMESYNC_CAPTURE_TX) {
         // Follow-up Packet
     	if (ig_intr_md.ingress_port != 192) {
             apply(timesyncs2s_store_capture_tx);
             apply(timesyncs2s_inform_cp);
-            //apply(timesyncs2s_inform_cp_diff);
      	}
     }
     // Forwarding for all packets based on MAC/IP

@@ -33,6 +33,7 @@
 #include <tofinopd/dptp_topo/pd/pd.h>
 #include <tofino/pdfixed/pd_common.h>
 #include <tofino/pdfixed/pd_conn_mgr.h>
+#include <port_mgr/bf_port_if.h>
 
 #define THRIFT_PORT_NUM 7777
 #define DPTP_GEN_REQ 0x11
@@ -188,7 +189,7 @@ void *monitor_timesynctopo_64(void *args) {
 				break;
       default:
         printf("Unexpected Case!\n");
-        return;
+        return NULL;
 		}
 		int switch_id = cp_flag[i];
 		bf_port_1588_timestamp_tx_get((bf_dev_id_t) 0, reqport, &capture_req_ts, &ts_valid1, &ts_id1);
@@ -245,7 +246,7 @@ void *monitor_timesynctopo_64(void *args) {
     int respWireDelay = now_macts_lo[i] - capture_resp_ts;
     //int respD = (latency_ig - ReqMacDelay - reqDelay - respDelay - respmacdelay)/2 + respDelay + respmacdelay;
     int respD_opt = (latency_tx - ReqMacDelay - respDelay)/2 + respDelay + respmacdelay;
-
+    printf("respD_opt=%d\n", respD_opt);
     uint32_t calc_time_hi_dptp = s2s_reference_hi_r  + (respD_opt / max_ns);
 		uint32_t calc_time_lo_dptp = s2s_reference_lo_r  + (respD_opt % max_ns);
 
@@ -255,16 +256,22 @@ void *monitor_timesynctopo_64(void *args) {
       calc_time_hi_dptp += 1;
     }
 		// Below are for ground-truth timestamp
-		p4_pd_dptp_topo_register_read_reference_ts_hi(sess_hdl, p4_dev_tgt, 0, REGISTER_READ_HW_SYNC, reference_hi_master, &count);
-		p4_pd_dptp_topo_register_read_reference_ts_lo(sess_hdl, p4_dev_tgt, 0, REGISTER_READ_HW_SYNC, reference_lo_master, &count);
+		p4_pd_dptp_topo_register_read_ts_hi(sess_hdl, p4_dev_tgt, 0, REGISTER_READ_HW_SYNC, reference_hi_master, &count);
+		p4_pd_dptp_topo_register_read_ts_lo(sess_hdl, p4_dev_tgt, 0, REGISTER_READ_HW_SYNC, reference_lo_master, &count);
 
     uint64_t reference_ts_master = 0;
     reference_ts_master = ((reference_ts_master | reference_hi_master[i]) << 32) | reference_lo_master[i];
     uint32_t reference_hi_master_r = reference_ts_master / max_ns;
     uint32_t reference_lo_master_r = reference_ts_master % max_ns;
-
+    printf("Reference_hi = %u, Reference_lo=%u\n", s2s_reference_hi[i], s2s_reference_lo[i]);
+    printf("now_macts_lo=%u\n", now_macts_lo);
+    printf("now_igts_hi=%u, now_igts_lo=%u\n", now_igts_hi[1], now_igts_lo[1]);
+    printf("reference_ts_master = %lu\n", reference_ts_master);
+    printf("reference_ts = %lu\n", reference_ts);
     uint32_t my_elp_hi = now_igts / max_ns;
 		uint32_t my_elp_lo = now_igts % max_ns;
+    printf("my_elp_hi=%u, my_elp_lo=%u\n",my_elp_hi, my_elp_lo);
+    printf("global_ts_ns= %lu\n", global_ts_ns_bef);
 		uint32_t orig_time_hi = reference_hi_master_r + my_elp_hi;
 		uint32_t orig_time_lo = reference_lo_master_r + my_elp_lo;
     if (orig_time_lo >= max_ns) {
@@ -290,8 +297,8 @@ void *monitor_timesynctopo_64(void *args) {
     ref_calc_time_hi = (reference_ts >> 32) & 0xFFFFFFFF;
     ref_calc_time_lo = reference_ts & 0xFFFFFFFF;
 
-    p4_pd_dptp_topo_register_write_reference_ts_hi(sess_hdl, p4_dev_tgt, switch_id, &ref_calc_time_hi);
-		p4_pd_dptp_topo_register_write_reference_ts_lo(sess_hdl, p4_dev_tgt, switch_id, &ref_calc_time_lo);
+    p4_pd_dptp_topo_register_write_ts_hi(sess_hdl, p4_dev_tgt, switch_id, &ref_calc_time_hi);
+		p4_pd_dptp_topo_register_write_ts_lo(sess_hdl, p4_dev_tgt, switch_id, &ref_calc_time_lo);
 		p4_pd_dptp_topo_register_write_timesyncs2s_cp_flag(sess_hdl, p4_dev_tgt, 0, cp_flag);
 		p4_pd_complete_operations(sess_hdl);
 		(void)p4_pd_commit_txn(sess_hdl, true);
@@ -353,7 +360,7 @@ void* send_dptp_requests(void *args) {
     if (stat  != BF_SUCCESS) {
       printf("Failed to send packet status=%s\n", bf_err_str(stat));
     }
-    usleep(100000);
+    usleep(1000000);
     i++;
   }
 }
@@ -373,8 +380,10 @@ p4_pd_dptp_topo_timesync_inform_cp_digest_digest_notify_cb
 	int ts_id;
   uint16_t num_entries = msg->num_entries;
   p4_pd_dptp_topo_timesync_inform_cp_digest_digest_entry_t digest;
+
 	for (i=0;i< num_entries;i++) {
-		uint16_t clientport = msg->entries[i].ig_intr_md_for_tm_ucast_egress_port;
+		uint16_t clientport = msg->entries[i].mdata_egress_port;
+    printf("Got Digest to read for port %d\n", clientport);
 		ts_valid = 0;
 		int j = 1;
 		while (ts_valid == 0) {
@@ -382,6 +391,7 @@ p4_pd_dptp_topo_timesync_inform_cp_digest_digest_notify_cb
 			capture_ts_32 = capture_ts & 0xFFFFFFFF;
 			j++;
  		}
+    printf("Sending followup packet\n");
 		send_bf_followup_packet(msg->entries[i].ethernet_dstAddr, capture_ts_32);
 	}
 	p4_pd_dptp_topo_timesync_inform_cp_digest_notify_ack(sess_hdl, msg);
@@ -424,8 +434,8 @@ void store_snapshot_64(uint32_t ts_sec, uint32_t ts_nsec, uint64_t global_ts_ns_
   } else {
     ts_nsec  = ts_nsec - offset_t_lo;
   }
-  p4_pd_dptp_topo_register_write_reference_ts_hi(sess_hdl, p4_dev_tgt, 0, &ts_sec);
-  p4_pd_dptp_topo_register_write_reference_ts_lo(sess_hdl, p4_dev_tgt, 0, &ts_nsec);
+  p4_pd_dptp_topo_register_write_ts_hi(sess_hdl, p4_dev_tgt, 0, &ts_sec);
+  p4_pd_dptp_topo_register_write_ts_lo(sess_hdl, p4_dev_tgt, 0, &ts_nsec);
 
 	status = p4_pd_complete_operations(sess_hdl);
 	(void)p4_pd_commit_txn(sess_hdl, true);
