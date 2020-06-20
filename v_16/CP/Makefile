@@ -1,9 +1,14 @@
 #
 # PROGNAME : Things to be changed according to program.
-# ARCH: vther it is tofinobm or tofino or bmv2.
+# PROFILE  : test | prod |
 #
 PROGNAME := dptp_main
 ARCH := tofino
+CXXFLAGS = 
+PROFILE := test
+ifeq ($(profile), test)
+	CXXFLAGS += -DTESTPROFILE
+endif
 SOURCES := src/dptp.cpp src/dptp_main.cpp
 TOFINO_BUILD_DIR = /root/bf-sde-9.1.1/install
 TOFINO_SDE_INCLUDE := -I$(TOFINO_BUILD_DIR)/include
@@ -22,8 +27,8 @@ $(TOFINO_BUILD_DIR)/lib/libdriver.so
 all: $(PROGNAME)
 
 $(PROGNAME):
-	@echo 'g++ -g -std=c++11 $(TOFINO_SDE_INCLUDE) $(SOURCES) -o $(PROGNAME) $(TOFINO_LIBS)'
-	@g++ -g -std=c++11 $(TOFINO_SDE_INCLUDE) $(SOURCES) -o $(PROGNAME) $(TOFINO_LIBS)
+	@echo 'g++ -g -std=c++11 $(CXXFLAGS) $(TOFINO_SDE_INCLUDE) $(SOURCES) -o $(PROGNAME) $(TOFINO_LIBS)'
+	@g++ -g -std=c++11 $(CXXFLAGS) $(TOFINO_SDE_INCLUDE) $(SOURCES) -o $(PROGNAME) $(TOFINO_LIBS)
 
 	@echo ' Finished successfully building.'
 

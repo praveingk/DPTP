@@ -1,18 +1,15 @@
 #!/bin/bash
 
 if [ $# -eq 1 ];then
-    use_old=true
+    profile=test
 else
-    use_old=false
+    profile=prod
 fi
 
-if [ $use_old == "true" ];then
-    makefile="Makefile.old"
-    setbash="set_bash.old"
-else
-    makefile="Makefile"
-    setbash="set_bash"
-fi
+
+makefile="Makefile"
+setbash="set_bash"
+
 
 source $setbash;
-make -f $makefile clean ; make -f $makefile; ./dptp_main
+make -f $makefile clean ; make -f $makefile profile=$profile; ./dptp_main
