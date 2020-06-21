@@ -148,7 +148,7 @@ control DptpNow (inout header_t hdr, inout metadata_t meta, in ingress_intrinsic
 
 
 #ifdef DPTP_CALC_DP
-control DptpCalc (inout header_t hdr, inout metadata_t meta) {
+control DptpCorrect (inout header_t hdr, inout metadata_t meta) {
 
     apply {
         /*
