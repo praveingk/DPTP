@@ -31,7 +31,7 @@ struct reply_digest_t {
     bit<32> elapsed_lo;
     bit<32> macts_lo;
     bit<32> egts_lo;
-    bit<32> now_igts_hi;
+    bit<16> now_igts_hi;
     bit<32> now_igts_lo;
     bit<32> now_macts_lo; 
 }
@@ -108,7 +108,7 @@ control DptpIngressDeparser (
             dptp_followup_digest.pack({(bit<16>)meta.mdata.egress_port, hdr.ethernet.dstAddr, meta.mdata.ingress_timestamp_clipped});
         }
         if (ig_intr_md_for_dprsr.digest_type == DPTP_REPLY_DIGEST_TYPE) {
-            dptp_reply_digest.pack({meta.mdata.switch_id[7:0],
+            dptp_reply_digest.pack({meta.mdata.switch_id,
                                         hdr.dptp.reference_ts_hi,
                                         hdr.dptp.reference_ts_lo,
                                         //hdr.dptp.igts[47:32],
@@ -120,7 +120,7 @@ control DptpIngressDeparser (
                                         meta.mdata.mac_timestamp_clipped});
         }
         if (ig_intr_md_for_dprsr.digest_type == DPTP_REPLY_FOLLOWUP_DIGEST_TYPE) {
-            dptp_reply_followup_digest.pack({meta.mdata.switch_id[7:0],
+            dptp_reply_followup_digest.pack({meta.mdata.switch_id,
                                                 hdr.dptp.reference_ts_hi});
         }
         pkt.emit(meta.bridged_header);
@@ -145,7 +145,9 @@ parser DptpEgressParser (
 
     state bridged_metadata {
         pkt.extract(meta.bridged_header);
+#ifdef LOGICAL_SWITCHES
         meta.mdata.switch_id = meta.bridged_header.switch_id;
+#endif
         transition parse_ethernet;
     }
 

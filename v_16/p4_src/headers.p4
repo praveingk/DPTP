@@ -11,10 +11,9 @@ struct dptp_metadata_t {
     bit<32> reference_ts_hi;
     bit<32> reference_ts_lo;
     bit<32> mac_timestamp_clipped;
-    bit<32> ingress_timestamp_clipped_hi;
+    bit<16> ingress_timestamp_clipped_hi;
     bit<32> ingress_timestamp_clipped;
     bit<32> reqdelay;
-    bit<32> capture_tx;
     bit<8>  switch_id;
     bit<8>  src_switch_id;
     bit<32> current_utilization;
@@ -28,7 +27,9 @@ struct dptp_metadata_t {
 }
 
 header bridged_header_t {
+#ifdef LOGICAL_SWITCHES
     bit<8> switch_id;
+#endif // LOGICAL_SWITCHES
     PortId_t ingress_port;
     bit<7> _pad0;
 }

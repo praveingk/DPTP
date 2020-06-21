@@ -28,51 +28,11 @@
 #define SWITCH_CPU 192
 
 #ifdef LOGICAL_SWITCHES
-#define MAX_SWITCHES 20
+#define MAX_SWITCHES 16
 #else
 #define MAX_SWITCHES 1
 #endif
 
-
-// control DptpReference (inout header_t hdr, inout metadata_t meta) {
-//     RegisterAction<bit<32>, bit<8>, bit<32>>(ts_hi) ts_hi_get = {
-//         void apply (inout bit<32> value, out bit<32> result) {  
-//             result = value;
-//         }
-//     };
-
-//     RegisterAction<bit<32>, bit<8>, bit<32>>(ts_lo) ts_lo_get = {
-//         void apply (inout bit<32> value, out bit<32> result) {
-//             result = value;
-//         }
-//     };
-
-//     action timesync_hi_request() {
-//         meta.mdata.reference_ts_hi = ts_hi_get.execute(meta.mdata.switch_id);
-//     }
-
-//     action timesync_request() {
-//         meta.mdata.reference_ts_lo = ts_lo_get.execute(meta.mdata.switch_id);
-//     }
-//     table timesync_hi_now {
-//         actions = {
-//             timesync_hi_request();
-//         }
-//         default_action = timesync_hi_request();
-//     }
-
-//     table timesync_now {
-//         actions = {
-//             timesync_request();
-//         }
-//         default_action = timesync_request();
-//     }
-
-//     apply {
-//         timesync_now.apply();
-//         timesync_hi_now.apply();
-//     }
-// }
 
 
 Register<bit<32>, bit<32>>(MAX_SWITCHES) ts_hi;
@@ -83,7 +43,7 @@ Register<bit<32>, bit<32>>(1) dptp_now_hi;
 
 Register<bit<32>, bit<32>>(1) dptp_now_lo;
 
-Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_igts_hi;
+Register<bit<16>, bit<16>>(MAX_SWITCHES) timesyncs2s_igts_hi;
 
 #ifdef DPTP_CALC_DP
 Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_egts_lo;
@@ -116,15 +76,15 @@ control DptpNow (inout header_t hdr, inout metadata_t meta, in ingress_intrinsic
         }
     };
 
-    RegisterAction<bit<32>, bit<8>, bit<32>>(timesyncs2s_igts_hi) timesyncs2s_igts_hi_set = {
-        void apply(inout bit<32> value, out bit<32> result) {
-            value = (bit<32>)ig_intr_md_from_parser_aux.global_tstamp[47:32];
+    RegisterAction<bit<16>, bit<8>, bit<16>>(timesyncs2s_igts_hi) timesyncs2s_igts_hi_set = {
+        void apply(inout bit<16> value, out bit<16> result) {
+            value = (bit<16>)ig_intr_md_from_parser_aux.global_tstamp[47:32];
             result = value;
         }
     }; 
 
     action timesyncs2s_capture_igTs_hi() {
-        meta.mdata.ingress_timestamp_clipped_hi = (bit<32>)timesyncs2s_igts_hi_set.execute(0);
+        meta.mdata.ingress_timestamp_clipped_hi = (bit<16>)timesyncs2s_igts_hi_set.execute(0);
     }
     action timesync_hi_request() {
         meta.mdata.reference_ts_hi = ts_hi_get.execute(meta.mdata.switch_id);
@@ -158,16 +118,30 @@ control DptpNow (inout header_t hdr, inout metadata_t meta, in ingress_intrinsic
         default_action = do_dptp_handle_overflow();
     }
 
-    apply {        
+    apply {
+        /*
+            DPTP Current Time Calculation Logic : 
+            1) Slice the ingress timestamp to hi (16-bit) and lo (32-bit)
+            2) Get the reference_hi and lo from ts_hi and ts_lo registers.
+            3) Add reference_hi + ingress_hi, reference_lo + ingress_lo
+            4) Now, we need to check if reference_lo + ingress_lo had overflown and handle it.
+            5) To check overflow the logic is as follows:
+                a) residue = MAX_32BIT - reference_lo
+                b) overflow_compare = residue <= ingress_lo?: Overflow : no Overflow
+                c) Since, tofino1 does not support the above operation, we do the below :
+                    1) overflow_compare = residue <= ingress_lo?: residue : ingress_lo
+                    2) compare_residue = ingress_lo - overflow_compare
+                    3) if compare_residue == 0, then no overlow, else overflow
+        */            
         timesyncs2s_capture_igTs_hi();
         meta.mdata.ingress_timestamp_clipped = (bit<32>)ig_intr_md_from_parser_aux.global_tstamp[31:0];
         timesync_hi_request();
-        timesync_request();
-        meta.mdata.dptp_now_hi = meta.mdata.reference_ts_hi + meta.mdata.ingress_timestamp_clipped_hi;
+        timesync_request();        
+        meta.mdata.dptp_now_lo = meta.mdata.reference_ts_lo + meta.mdata.ingress_timestamp_clipped;
+        meta.mdata.dptp_now_hi = meta.mdata.reference_ts_hi + (bit<32>)meta.mdata.ingress_timestamp_clipped_hi;
         meta.mdata.dptp_residue = MAX_32BIT - meta.mdata.reference_ts_lo;
         do_dptp_compare_residue();
         meta.mdata.dptp_compare_residue = meta.mdata.ingress_timestamp_clipped - meta.mdata.dptp_overflow_compare;
-        meta.mdata.dptp_now_lo = meta.mdata.reference_ts_lo + meta.mdata.ingress_timestamp_clipped;
         dptp_handle_overflow.apply();
     }
 }
@@ -322,18 +296,6 @@ control DptpIngress(
     action timesync_flag_cp_learn() {
         ig_intr_md_for_dprsr.digest_type = DPTP_FOLLOWUP_DIGEST_TYPE;
     }    
-    
-     
-    // table copy_dptp_packet {
-    //     actions = {
-    //         dptp_packet();
-    //         nop();
-    //     }
-    //     key = {
-    //         meta.mdata.command: exact;
-    //     }
-    //     default_action = nop();
-    // }
     
     table dptp_store_now_hi {
         actions = {
@@ -507,30 +469,26 @@ control DptpIngress(
         }
 #ifdef LOGICAL_SWITCHES        
         mac_forward.apply();
+        meta.bridged_header.switch_id = meta.mdata.switch_id;
 #endif // LOGICAL_SWITCHES
-        if (hdr.dptp.isValid()) {
-            meta.bridged_header.setValid();
-            meta.bridged_header.switch_id = meta.mdata.switch_id;
-            meta.bridged_header.ingress_port = ig_intr_md.ingress_port;
-            do_qos();
-        }
-
+        meta.bridged_header.setValid();
+        meta.bridged_header.ingress_port = ig_intr_md.ingress_port;
+        do_qos();
     }
 }
-control DptpSwitchIngress(
+
+control virtSwitch(
     inout header_t hdr, 
-    inout metadata_t meta, 
+    inout metadata_t meta,     
     in ingress_intrinsic_metadata_t ig_intr_md, 
-    in ingress_intrinsic_metadata_from_parser_t ig_intr_md_from_parser_aux, 
-    inout ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr, 
-    inout ingress_intrinsic_metadata_for_tm_t ig_intr_md_for_tm) {
+    inout ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr) {
 
     action _drop() {
         ig_intr_md_for_dprsr.drop_ctl = 1;
     }
 
     action nop() {}
-#ifdef LOGICAL_SWITCHES
+
     action classify_switch (bit<8> switch_id) {
         meta.mdata.switch_id = switch_id;
     }
@@ -573,24 +531,17 @@ control DptpSwitchIngress(
         }
         default_action = nop();
     }
-#endif // LOGICAL_SWITCHES
-            
-    DptpNow() dptp_now;
-    DptpIngress() dptp_ingress;
+
     apply {
-        // Virtualization using loopback cables.
-#ifdef LOGICAL_SWITCHES
         acl.apply();
         if (hdr.dptp.isValid()) {
             classify_logical_switch.apply();
             classify_src_logical_switch.apply();
         }
-#endif // LOGICAL SWITCHES        
-        dptp_now.apply(hdr, meta, ig_intr_md_from_parser_aux);
-        // Current Global time is now available here.
-        dptp_ingress.apply(hdr, meta, ig_intr_md, ig_intr_md_from_parser_aux, ig_intr_md_for_dprsr, ig_intr_md_for_tm);
     }
+
 }
+
 
 #ifdef LOGICAL_SWITCHES
 Register<bit<32>, bit<32>>(MAX_LINKS) current_utilization;
@@ -626,10 +577,6 @@ control DptpEgress(
     };
     
     /*** Actions ***/
-    // action do_calc_current_utilization (bit<16> link) {
-    //     meta.mdata.current_utilization = (bit<32>)current_utilization_bps.execute(eg_intr_md.pkt_length, link);
-    //     meta.mdata.link = link;
-    // }
 
     action do_calc_host_rate () {
         meta.mdata.current_utilization = (bit<32>)current_utilization_bps.execute(eg_intr_md.pkt_length, meta.bridged_header.ingress_port);
@@ -651,7 +598,6 @@ control DptpEgress(
         //eg_intr_md_for_oport.update_delay_on_tx = 1;
         eg_intr_md_for_oport.capture_tstamp_on_tx = 1;
     }
-
     action do_dptp_response () {
         hdr.dptp.command = COMMAND_DPTP_RESPONSE;
         hdr.dptp.egts = eg_intr_md_from_parser_aux.global_tstamp;
@@ -665,21 +611,7 @@ control DptpEgress(
         hdr.dptp.egts = eg_intr_md_from_parser_aux.global_tstamp;
     }
 
-    /*** Tables ***/
-    // table calc_current_utilization {
-    //     actions = {
-    //         do_calc_current_utilization();
-    //         nop();
-    //     }
-    //     key = {
-    //         meta.bridged_header.ingress_port: exact;
-    //     }
-    //     size = MAX_LINKS;
-    //     default_action = nop();
-    // }
-
     apply {
-        //calc_current_utilization.apply();
         do_calc_host_rate();
         if (meta.mdata.command != COMMAND_DPTP_FOLLOWUP) {
             do_dptp_capture_tx();
@@ -695,12 +627,54 @@ control DptpEgress(
 }
 
 
+/* Below code demonstrates how to integrate DPTP control inside any p4_16 code */
+
+control DptpSwitchIngress(
+    inout header_t hdr, 
+    inout metadata_t meta, 
+    in ingress_intrinsic_metadata_t ig_intr_md, 
+    in ingress_intrinsic_metadata_from_parser_t ig_intr_md_from_parser_aux, 
+    inout ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr, 
+    inout ingress_intrinsic_metadata_for_tm_t ig_intr_md_for_tm) {
+
+#ifdef LOGICAL_SWITCHES
+    virtSwitch() virt_switch;
+#endif // LOGICAL_SWITCHES
+
+    DptpNow() dptp_now;
+    DptpIngress() dptp_ingress;
+    apply {
+
+#ifdef LOGICAL_SWITCHES    
+        virt_switch.apply(hdr, meta, ig_intr_md, ig_intr_md_for_dprsr);
+#endif // LOGICAL SWITCHES        
+        dptp_now.apply(hdr, meta, ig_intr_md_from_parser_aux);
+        // Current Global time is now available here.
+        dptp_ingress.apply(hdr, meta, ig_intr_md, ig_intr_md_from_parser_aux, ig_intr_md_for_dprsr, ig_intr_md_for_tm);
+    }
+}
+
+control DptpSwitchEgress(
+    inout header_t hdr, 
+    inout metadata_t meta, 
+    in egress_intrinsic_metadata_t eg_intr_md, 
+    in egress_intrinsic_metadata_from_parser_t eg_intr_md_from_parser_aux,
+    inout egress_intrinsic_metadata_for_deparser_t eg_intr_md_for_dprsr,
+    inout egress_intrinsic_metadata_for_output_port_t eg_intr_md_for_oport) {
+
+    DptpEgress() dptp_egress;
+
+    apply {
+        dptp_egress.apply(hdr, meta, eg_intr_md, eg_intr_md_from_parser_aux, eg_intr_md_for_dprsr, eg_intr_md_for_oport);
+    }
+}
+
 Pipeline(
     DptpIngressParser(), 
     DptpSwitchIngress(), 
     DptpIngressDeparser(), 
     DptpEgressParser(), 
-    DptpEgress(), 
+    DptpSwitchEgress(), 
     DptpEgressDeparser()) pipe;
 
 Switch(pipe) main;
