@@ -3,9 +3,9 @@ Data-Plane Time synchronization Protocol
 (https://www.comp.nus.edu.sg/~pravein/papers/DPTP_SOSR19.pdf)
 This source code synchronizes two Barefoot Tofino switches to support a global timing (64-bit) in the data-plane. 
 
-p4_14 : v_14/ (Tested on SDE 8.x.x)
+p4_14 : [v_14/](https://github.com/praveingk/DPTP/v_14) (Tested on SDE 8.x.x)
 
-p4_16 : v_16/ (Tested on SDE 9.x.x)
+p4_16 : [v_16/](https://github.com/praveingk/DPTP/v_16) (Tested on SDE 9.x.x)
 
 
 # Topology 
@@ -15,11 +15,12 @@ The Topology used in as below :
 
 
 A single tofino switch named "tofino1" is virtualized into two switches Master(M) and Switch1. To do this virtualization, you will need to add a loopback link between port3 (160-163) and port5 (176-179). Once done, it will be configured as 10G ports, and we will be using only one link (160-176) as the connection between Switch1 and Master. Additionally, you will need atleast one host connected to port 1(128-131) to send DPTP requests.
-### Steps to run DPTP in Tofino:
+### Steps to run p4_14 based DPTP in Tofino:
 
 1) Navigate to the SDE PATH :
 ```shell
-     cd ~/bf-sde-9.x.x
+     cd ~/bf-sde-8.x.x
+     export DPTP_PATH=<PATH TO DPTP FOLDER>
 ```
 2) Set the env variables : 
 ```shell
@@ -27,14 +28,46 @@ A single tofino switch named "tofino1" is virtualized into two switches Master(M
 ```
 3) Build the p4 program using the command :
 ```shell
-     ./p4_build ../<YOUR PATH>/DPTP/v_16/p4_src/dptp.p4
+     ./p4_build.sh $DPTP_PATH/v_14/dptp_topo.p4
 ```
 4) Load the p4 program, and run the control plane API code using :
 ```shell
-     "cd ../<YOUR PATH>/DPTP/v_16/CP"
+     "cd $DPTP_PATH/v_14/CP"
      "./run.sh"
 ```
 5) This should automatically start the synchronization between Switch1 and master through packets from control-plane.
+
+
+### Steps to run p4_16 based DPTP in Tofino:
+
+1) Navigate to the SDE PATH :
+```shell
+     cd ~/bf-sde-9.x.x
+     export DPTP_PATH=<PATH TO DPTP FOLDER>
+```
+2) Set the env variables : 
+```shell
+     . ./set_sde.bash
+```
+3) DPTP program in p4_16 has multiple profiles :
+
+     a) DPTP with logical switches to get measurements and to do a sanity check.
+     ```shell
+          ./p4_build.sh -DLOGICAL_SWITCHES $DPTP_PATH/v_16/p4_src/dptp.p4
+     ```
+     
+     b) DPTP without logical switches. This is basically the program that can be included in any p4 programs
+     ```shell
+          ./p4_build.sh $DPTP_PATH/v_16/p4_src/dptp.p4
+     ``` 
+     
+4) Load the p4 program, and run the control plane API code using :
+```shell
+     "cd $DPTP_PATH/v_16/CP"
+     "./run.sh"
+```
+5) This should automatically start the synchronization between Switch1 and master through packets from control-plane.
+
 
 ### Steps to run MoonGen for host synchronization:
 Moongen script sends synchronization requests packets between switches
