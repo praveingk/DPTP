@@ -45,24 +45,6 @@ Register<bit<32>, bit<32>>(1) dptp_now_lo;
 
 Register<bit<16>, bit<16>>(MAX_SWITCHES) timesyncs2s_igts_hi;
 
-#ifdef DPTP_CALC_DP
-Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_egts_lo;
-
-Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_elapsed_lo;
-
-Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_igts_lo;
-
-Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_macts_lo;
-
-Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_now_macts_lo;
-
-Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_reference_hi;
-
-Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_reference_lo;
-
-Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_updts_lo;
-#endif // DPTP_CALC_DP
-
 control DptpNow (inout header_t hdr, inout metadata_t meta, in ingress_intrinsic_metadata_from_parser_t ig_intr_md_from_parser_aux) {
     RegisterAction<bit<32>, bit<8>, bit<32>>(ts_hi) ts_hi_get = {
         void apply (inout bit<32> value, out bit<32> result) {  
@@ -147,13 +129,74 @@ control DptpNow (inout header_t hdr, inout metadata_t meta, in ingress_intrinsic
 }
 
 
-#ifdef DPTP_CALC_DP
+#ifdef DPTP_CALC_DP // Used to perform DPTP time correction/calculation in the Data-plane
+
+Register<bit<32>, bit<32>>(MAX_SWITCHES) dptp_reqmacdelay;
+
+Register<bit<32>, bit<32>>(MAX_SWITCHES) dptp_respigts;
+
+Register<bit<32>, bit<32>>(MAX_SWITCHES) dptp_respnow_hi;
+
+Register<bit<32>, bit<32>>(MAX_SWITCHES) dptp_respnow_lo;
+
+control DptpRespStore (inout header_t hdr, inout metadata_t meta) {
+    
+    RegisterAction<bit<32>, bit<8>, bit<32>>(dptp_reqmacdelay) dptp_reqmacdelay_set = {
+        void apply(inout bit<32> value) {
+            value = (bit<32>)hdr.dptp.igmacts;
+        }
+    };
+
+    RegisterAction<bit<32>, bit<8>, bit<32>>(dptp_respigts) dptp_respigts_set = {
+        void apply(inout bit<32> value, out bit<32> result) {
+            value = (bit<32>)hdr.dptp.igts;
+        }
+    };    
+
+    RegisterAction<bit<32>, bit<8>, bit<32>>(dptp_respnow_hi) dptp_respnow_hi_set = {
+        void apply(inout bit<32> value) {
+            value = hdr.dptp.reference_ts_hi;
+        }
+    };
+
+    RegisterAction<bit<32>, bit<8>, bit<32>>(dptp_respnow_lo) dptp_respnow_lo_set = {
+        void apply(inout bit<32> value) {
+            value = hdr.dptp.reference_ts_lo;
+        }
+    };
+    
+    action dptp_store_reqmacdelay (bit<8> switch_id) {
+        dptp_reqmacdelay_set.execute(switch_id);
+    }
+    
+    action dptp_store_respigts () {
+        dptp_respigts_set.execute(meta.mdata.switch_id);
+    }
+
+    action dptp_store_reference_hi () {
+        dptp_respnow_hi_set.execute(meta.mdata.switch_id);
+    }
+    
+    action dptp_store_reference_lo () {
+        dptp_respnow_lo_set.execute(meta.mdata.switch_id);
+    }
+    
+    apply {
+        /*
+        This control processes the reply packet, and stores the necessary information
+        needed while the followup message comes. What all we need to store?
+        1) Reference_hi, Reference_lo
+        2) ReqMacDelaytimesyncs2s_capture
+        */
+    }
+}
+
 control DptpCorrect (inout header_t hdr, inout metadata_t meta) {
 
     apply {
         /*
         What info we need for time calculation/offset at data-plane?
-        1) ReqCaptureTxtimesyncs2s_capture_igTs_hi
+        1) ReqCaptureTx
         2) ReqMacDelay (igress - mac from server)
         3) ReferenceTs
         4) ElapsedTs (IgTs)
@@ -180,7 +223,7 @@ control DptpCorrect (inout header_t hdr, inout metadata_t meta) {
                 Reference_lo = (Reference_lo + MAX_32BIT) - nowIgTs_lo -> Need to figure how to do this.
                 Reference_hi = Reference_hi - 1
 
-        Recirculate the followup packet, and update the actual Reference Register
+        Embed the  recalculated reference in followup packet, and update the actual Reference Register so that 
         */
 
     }
@@ -207,57 +250,6 @@ control DptpIngress(
         }
     };
 
-#ifdef DPTP_CALC_DP    
-    RegisterAction<bit<32>, bit<32>, bit<32>>(timesyncs2s_egts_lo) timesyncs2s_egts_lo_set = {
-        void apply(inout bit<32> value) {
-            value = (bit<32>)hdr.dptp.egts[31:0];
-        }
-    };
-    
-    RegisterAction<bit<32>, bit<8>, bit<32>>(timesyncs2s_elapsed_lo) timesyncs2s_elapsed_lo_set = {
-        void apply(inout bit<32> value) {
-            value = (bit<32>)hdr.dptp.igts[31:0];
-        }
-    };
-    
-    RegisterAction<bit<32>, bit<8>, bit<32>>(timesyncs2s_igts_lo) timesyncs2s_igts_lo_set = {
-        void apply(inout bit<32> value, out bit<32> result) {
-            value = (bit<32>)ig_intr_md_from_parser_aux.global_tstamp[31:0];
-            result = value;
-        }
-    };
-    
-    RegisterAction<bit<32>, bit<8>, bit<32>>(timesyncs2s_macts_lo) timesyncs2s_macts_lo_set = {
-        void apply(inout bit<32> value) {
-            value = (bit<32>)hdr.dptp.igmacts;
-        }
-    };
-    
-    RegisterAction<bit<32>, bit<8>, bit<32>>(timesyncs2s_now_macts_lo) timesyncs2s_now_macts_lo_set = {
-        void apply(inout bit<32> value) {
-            value = (bit<32>)ig_intr_md.ingress_mac_tstamp[31:0];
-        }
-    };
-    
-    RegisterAction<bit<32>, bit<8>, bit<32>>(timesyncs2s_reference_hi) timesyncs2s_reference_hi_set = {
-        void apply(inout bit<32> value) {
-            value = hdr.dptp.reference_ts_hi;
-        }
-    };
-
-    RegisterAction<bit<32>, bit<8>, bit<32>>(timesyncs2s_reference_lo) timesyncs2s_reference_lo_set = {
-        void apply(inout bit<32> value) {
-            value = hdr.dptp.reference_ts_lo;
-        }
-    };
-    
-    RegisterAction<bit<32>, bit<8>, bit<32>>(timesyncs2s_updts_lo) timesyncs2s_updts_lo_set = {
-        void apply(inout bit<32> value) {
-            value = (bit<32>)hdr.dptp.capturets;
-        }
-    };
-#endif
-
     action _drop() {
         ig_intr_md_for_dprsr.drop_ctl = 1;
     }
@@ -274,7 +266,7 @@ control DptpIngress(
     action do_dptp_store_now_hi() {
         dptp_now_hi_set.execute(0);
     }
-    
+
     action do_dptp_store_now_lo() {
         dptp_now_lo_set.execute(0);
     }
@@ -339,129 +331,33 @@ control DptpIngress(
         size = 20;
         default_action = nop();
     }
-    
-
-#ifdef DPTP_CALC_DP
-    action timesyncs2s_capture_egTs_lo() {
-        timesyncs2s_egts_lo_set.execute(meta.mdata.switch_id);
-    }
-    
-    action timesyncs2s_capture_elapsed_lo() {
-        timesyncs2s_elapsed_lo_set.execute(meta.mdata.switch_id);
-    }
-    
-    action timesyncs2s_capture_igTs_lo(bit<8> switch_id) {
-        meta.mdata.ingress_timestamp_clipped = timesyncs2s_igts_lo_set.execute(switch_id);
-    }
-    
-    action timesyncs2s_capture_macTs_lo() {
-        timesyncs2s_macts_lo_set.execute(meta.mdata.switch_id);
-    }
-    ig_intr_md_for_dprsr.digest_type = DPTP_FOLLOWUP_DIGEST_TYPE;
-    action timesyncs2s_capture_now_macTs_lo() {
-        meta.mdata.mac_timestamp_clipped = timesyncs2s_now_macts_lo_set.execute(meta.mdata.switch_id);
-    }
-    
-    action timesyncs2s_capture_reference_hi() {
-        timesyncs2s_reference_hi_set.execute(meta.mdata.switch_id);
-    }
-    
-    action timesyncs2s_capture_reference_lo() {
-        timesyncs2s_reference_lo_set.execute(meta.mdata.switch_id);
-    }
-    
-    action timesyncs2s_capture_updTs_lo() {
-        timesyncs2s_updts_lo_set.execute(meta.mdata.switch_id);
-    }
-
-    table timesyncs2s_store_egTs_lo {
-        actions = {
-            timesyncs2s_capture_egTs_lo();
-        }
-        default_action = timesyncs2s_capture_egTs_lo();
-    }
-    
-    table timesyncs2s_store_elapsed_lo {
-        actions = {
-            timesyncs2s_capture_elapsed_lo();
-        }
-        default_action = timesyncs2s_capture_elapsed_lo();
-    }
-    
-
-    table timesyncs2s_store_igTs_lo {
-        actions = {
-            timesyncs2s_capture_igTs_lo();
-            nop();
-        }
-        key = {
-            meta.mdata.command  : exact;
-            meta.mdata.switch_id: exact;
-        }
-        default_action = nop();//timesyncs2s_store_igTs_lo(20);
-    }
-    
-    table timesyncs2s_store_macTs_lo {
-        actions = {
-            timesyncs2s_capture_macTs_lo();
-        }
-        default_action = timesyncs2s_capture_macTs_lo();
-    }
-    
-    table timesyncs2s_store_now_macTs_lo {
-        actions = {
-            timesyncs2s_capture_now_macTs_lo();
-        }
-        default_action = timesyncs2s_capture_now_macTs_lo();
-    }
-    
-    table timesyncs2s_store_reference_hi {
-        actions = {
-            timesyncs2s_capture_reference_hi();
-        }
-        default_action = timesyncs2s_capture_reference_hi();
-    }
-    
-    table timesyncs2s_store_reference_lo {
-        actions = {
-            timesyncs2s_capture_reference_lo();
-        }
-        default_action = timesyncs2s_capture_reference_lo();
-    }
-    
-    table timesyncs2s_store_updTs_lo {
-        actions = {
-            timesyncs2s_capture_updTs_lo();
-        }
-        default_action = timesyncs2s_capture_updTs_lo();
-    }
-#endif // DPTP_CALC_DP
 
 
     apply {
         if (meta.mdata.command == COMMAND_DPTPS2S_RESPONSE) {
-//#ifdef DPTP_CALC_DP
+#ifdef DPTP_CALC_DP
             // DPTP Reference Adjustment in the data-plane.
-//#elif
+            DptpRespStore.apply();
+#else
             // Send a Digest to control-plane for DPTP Reference Adjustment
             meta.mdata.mac_timestamp_clipped = (bit<32>)ig_intr_md.ingress_mac_tstamp[31:0];
             ig_intr_md_for_dprsr.digest_type = DPTP_REPLY_DIGEST_TYPE;
             _drop();
-//#endif
+#endif
             // Send Digest to Control-plane along with reply details
-        } else {
-            if (meta.mdata.command == COMMAND_DPTP_FOLLOWUP) {
-                if (ig_intr_md.ingress_port != SWITCH_CPU) {
-//#ifdef DPTP_CALC_DP
-                    // DPTP Reference Adjustment in the data-plane.
-//#elif
-                    // Send Digest to Control-plane along with reply details for Time calculation.
-                    ig_intr_md_for_dprsr.digest_type = DPTP_REPLY_FOLLOWUP_DIGEST_TYPE;
-                    _drop();
-//#endif
-                }
+        } else if (meta.mdata.command == COMMAND_DPTP_FOLLOWUP) {
+            if (ig_intr_md.ingress_port != SWITCH_CPU) {
+#ifdef DPTP_CALC_DP
+                //DPTP Reference Adjustment in the data-plane.
+                DptpCorrect.apply();
+#else
+                // Send Digest to Control-plane along with reply details for Time calculation.
+                ig_intr_md_for_dprsr.digest_type = DPTP_REPLY_FOLLOWUP_DIGEST_TYPE;
+                _drop();
+#endif
             }
         }
+
         if (meta.mdata.command == COMMAND_DPTP_REQUEST || meta.mdata.command == COMMAND_DPTPS2S_REQUEST) {
             reverse_packet();
             fill_dptp_packet();
