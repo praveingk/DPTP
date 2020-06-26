@@ -31,7 +31,7 @@ struct reply_digest_t {
     bit<32> elapsed_lo;
     bit<32> macts_lo;
     bit<32> egts_lo;
-    bit<32> now_igts_hi;
+    bit<16> now_igts_hi;
     bit<32> now_igts_lo;
     bit<32> now_macts_lo; 
 }
@@ -80,18 +80,12 @@ parser DptpIngressParser (
 
     state parse_ipv4 {
         pkt.extract(hdr.ipv4);
-        meta.mdata.type = 3;
         transition accept;
     }
     
     state parse_dptp {
-        pkt.extract(hdr.timesync);
-        meta.mdata.command = hdr.timesync.command;
-        meta.mdata.type = 4;
-        // meta.mdata.reference_ts_hi = hdr.timesync.reference_ts_hi;
-        // meta.mdata.reference_ts_lo = hdr.timesync.reference_ts_lo;
-        // meta.mdata.result_ts_hi = 0;
-        // meta.mdata.result_ts_lo = 0;
+        pkt.extract(hdr.dptp);
+        meta.mdata.command = (bit<5>)hdr.dptp.command;
         transition accept;
     }
 }
@@ -101,36 +95,39 @@ control DptpIngressDeparser (
     inout header_t hdr, 
     in metadata_t meta, 
     in ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr) {
-
+    // in ingress_intrinsic_metadata_t ig_intr_md, 
+    // in ingress_intrinsic_metadata_from_parser_t ig_intr_md_from_parser_aux, 
+    // inout ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr, 
+    // inout ingress_intrinsic_metadata_for_tm_t ig_intr_md_for_t) {
     Digest<followup_digest_t>()          dptp_followup_digest;
     Digest<reply_digest_t>()             dptp_reply_digest;
     Digest<reply_followup_digest_t>()    dptp_reply_followup_digest;
 
     apply {
         if (ig_intr_md_for_dprsr.digest_type == DPTP_FOLLOWUP_DIGEST_TYPE) {
-            dptp_followup_digest.pack({meta.mdata.egress_port, hdr.ethernet.dstAddr, meta.mdata.ingress_timestamp_clipped});
+            dptp_followup_digest.pack({(bit<16>)meta.mdata.egress_port, hdr.ethernet.dstAddr, meta.mdata.ingress_timestamp_clipped});
         }
         if (ig_intr_md_for_dprsr.digest_type == DPTP_REPLY_DIGEST_TYPE) {
-            dptp_reply_digest.pack({meta.mdata.switch_id[7:0],
-                                        hdr.timesync.reference_ts_hi,
-                                        hdr.timesync.reference_ts_lo,
-                                        //hdr.timesync.igts[47:32],
-                                        hdr.timesync.igts[31:0],
-                                        hdr.timesync.igmacts[31:0],
-                                        hdr.timesync.egts[31:0],
+            dptp_reply_digest.pack({meta.mdata.switch_id,
+                                        hdr.dptp.reference_ts_hi,
+                                        hdr.dptp.reference_ts_lo,
+                                        //hdr.dptp.igts[47:32],
+                                        hdr.dptp.igts[31:0],
+                                        hdr.dptp.igmacts[31:0],
+                                        hdr.dptp.egts[31:0],
                                         meta.mdata.ingress_timestamp_clipped_hi,
                                         meta.mdata.ingress_timestamp_clipped,
                                         meta.mdata.mac_timestamp_clipped});
         }
         if (ig_intr_md_for_dprsr.digest_type == DPTP_REPLY_FOLLOWUP_DIGEST_TYPE) {
-            dptp_reply_followup_digest.pack({meta.mdata.switch_id[7:0],
-                                                hdr.timesync.reference_ts_hi});
+            dptp_reply_followup_digest.pack({meta.mdata.switch_id,
+                                                hdr.dptp.reference_ts_hi});
         }
         pkt.emit(meta.bridged_header);
         //pkt.emit(hdr.transparent_clock);
         pkt.emit(hdr.ethernet);
         pkt.emit(hdr.ipv4);
-        pkt.emit(hdr.timesync);
+        pkt.emit(hdr.dptp);
     }
 }
 
@@ -148,7 +145,9 @@ parser DptpEgressParser (
 
     state bridged_metadata {
         pkt.extract(meta.bridged_header);
+#ifdef LOGICAL_SWITCHES
         meta.mdata.switch_id = meta.bridged_header.switch_id;
+#endif
         transition parse_ethernet;
     }
 
@@ -175,10 +174,10 @@ parser DptpEgressParser (
     }
     
     state parse_dptp {
-        pkt.extract(hdr.timesync);
-        meta.mdata.command = hdr.timesync.command;
-        // meta.mdata.reference_ts_hi = hdr.timesync.reference_ts_hi;
-        // meta.mdata.reference_ts_lo = hdr.timesync.reference_ts_lo;
+        pkt.extract(hdr.dptp);
+        meta.mdata.command = (bit<5>)hdr.dptp.command;
+        // meta.mdata.reference_ts_hi = hdr.dptp.reference_ts_hi;
+        // meta.mdata.reference_ts_lo = hdr.dptp.reference_ts_lo;
         // meta.mdata.result_ts_hi = 0;
         // meta.mdata.result_ts_lo = 0;
         transition accept;
