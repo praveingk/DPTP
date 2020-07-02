@@ -186,8 +186,13 @@ control DptpRespStore (inout header_t hdr, inout metadata_t meta) {
         This control processes the reply packet, and stores the necessary information
         needed while the followup message comes. What all we need to store?
         1) Reference_hi, Reference_lo
-        2) ReqMacDelaytimesyncs2s_capture
+        2) ReqMacDelay
+        3) ElapsedIngress TS
         */
+        dptp_store_reference_hi();
+        dptp_store_reference_lo();
+        dptp_store_reqmacdelay();
+        dptp_store_respigts();
     }
 }
 
