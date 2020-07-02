@@ -111,6 +111,10 @@ using namespace dptp;
   
   uint32_t max_ns = 1000000000;
 
+  bool updateEra = false;
+  bool DptpCalcInProgress = false;
+
+
   bf_status_t dptp::setUp(void) {
     dev_tgt.dev_id = 0;
     dev_tgt.pipe_id = ALL_PIPES;
@@ -228,12 +232,14 @@ using namespace dptp;
     return BF_SUCCESS;
   }
 
+/* Increment Era upon detecting a wrap over of the data-plane timestamp of the switch.
+ */
   bf_status_t dptp::incrementEra () {
-    // ts_hi needs to incremented by 0x10000 (65536)
     return BF_SUCCESS;
   }
   /* Monitor global_ts, and check for wrap over for era maintenance */
-  void* dptp::eraMaintenance (void *args) {
+  void* dptp::eraMaintenance (void *args)  {
+    // Logic: Take two samples of data-plane timestamp, if latter < former, then wrap over detected
     bf_status_t status;
     uint64_t global_ts_ns_old;
     uint64_t global_ts_ns_new;
@@ -245,7 +251,11 @@ using namespace dptp;
       //printf("%lu,%lu\n", global_ts_ns_old, global_ts_ns_new);
       if (global_ts_ns_new < global_ts_ns_old) {
         // Wrap Detected.
-        incrementEra();
+        if (DptpCalcInProgress) {
+          updateEra = true;
+        } else {
+          incrementEra();
+        }
       }
       sleep(2);
     }
@@ -285,8 +295,10 @@ using namespace dptp;
 
     *ts_hi = (uint32_t)ts_hi_val[0];
     *ts_lo = (uint32_t)ts_lo_val[0];
+#ifdef DEBUG
     printf("ts_hi content: %u\n", *ts_hi);
     printf("ts_lo content: %u\n", *ts_lo);
+#endif
     return BF_SUCCESS;
   }
 
@@ -385,7 +397,9 @@ using namespace dptp;
     if (stat  != BF_SUCCESS) {
       printf("Failed to send packet status=%s\n", bf_err_str(stat));
     } else {
+#ifdef DEBUG
       printf("Packet sent successfully capture_tx=%x\n", htonl(tx_capture_tstamp_lo));
+#endif
     }
     return BF_SUCCESS;
   }
@@ -408,10 +422,11 @@ using namespace dptp;
 
     for (;i<vec.size();i++) {
       vec[i].get()->getValue(learn_egress_port, &egress_port);          
-      //vec[0].get()->getValue(learn_mac_addr, &mac_addr);
       vec[i].get()->getValue(learn_mac_addr, size, dstAddr);
+#ifdef DEBUG
       printf("Egress port = %u\n", egress_port);  
       printf("Mac Addr    = %X %X %X %X %X %X\n", dstAddr[0],dstAddr[1],dstAddr[2],dstAddr[3],dstAddr[4], dstAddr[5]);  
+#endif
       ts_valid = 0;
 		  int j = 1;
 		  while (ts_valid == 0) {
@@ -432,14 +447,16 @@ using namespace dptp;
                             bf_rt_learn_msg_hdl *const learn_msg_hdl,
                             const void *cookie) {
     uint8_t switch_id = 0;
-	bf_dev_port_t reqport = 160;
+    bf_dev_port_t reqport = 160;
     int i= 0;
     int ts_id;
     bool ts_valid;
 
     for (;i<vec.size();i++) {
-      vec[i].get()->getValue(learn_rswitch_id, 1, &switch_id);          
+      vec[i].get()->getValue(learn_rswitch_id, 1, &switch_id);   
+#ifdef DEBUG       
       printf("Reply received on switch %d\n", switch_id);
+#endif
       if (switch_id > MAX_SWITCHES) {
         printf("Not expecting this switch-id, return!!\n");
         return BF_UNEXPECTED;
@@ -451,7 +468,7 @@ using namespace dptp;
         default:
           printf("Unexpected Case!\n");
           return BF_UNEXPECTED;
-	  }
+      }
       bf_port_1588_timestamp_tx_get((bf_dev_id_t) 0, reqport, &capture_req_tx[switch_id], &ts_valid, &ts_id);
       vec[i].get()->getValue(learn_reference_ts_hi, &s2s_reference_hi[switch_id]);          
       vec[i].get()->getValue(learn_reference_ts_lo, &s2s_reference_lo[switch_id]);          
@@ -469,12 +486,13 @@ using namespace dptp;
       s2s_reference_hi_d[switch_id] = a;
       s2s_reference_lo_d[switch_id] = b;
   	  uint64_t now_igts_c = 0;
-	  now_igts_c = ((now_igts_c | now_igts_hi[switch_id]) << 32) | now_igts_lo[switch_id];
+      now_igts_c = ((now_igts_c | now_igts_hi[switch_id]) << 32) | now_igts_lo[switch_id];
       a = now_igts_c / max_ns;
       b = now_igts_c % max_ns;
       now_igts_hi_d[switch_id] = a;
       now_igts_lo_d[switch_id] = b;
 
+#ifdef DEBUG
       printf("Reference_hi   = %u, Reference_lo   =%u\n", s2s_reference_hi[switch_id], s2s_reference_lo[switch_id]);
       printf("Reference TS   = %lu\n", reference_ts_c);
       printf("Reference_hi_d = %u, Reference_lo_d =%u\n", s2s_reference_hi_d[switch_id], s2s_reference_lo_d[switch_id]);
@@ -485,7 +503,7 @@ using namespace dptp;
       printf("now_macts_lo   = %u\n", now_macts_lo[switch_id]); 
       printf("now_igts_lo    = %u\n", now_igts_lo[switch_id]); 
       printf("now_igts_hi_d  = %u, now_igts_lo_d = %u\n", now_igts_hi_d[switch_id], now_igts_lo_d[switch_id]); 
-
+#endif
     }
 
     initReferenceTsAPI();
@@ -530,7 +548,7 @@ using namespace dptp;
     uint32_t reference_hi_master_r = reference_ts_master / max_ns;
     uint32_t reference_lo_master_r = reference_ts_master % max_ns;
 
-    printf("ref %u,%u\n", reference_hi_master_r, reference_lo_master_r);
+    //printf("ref %u,%u\n", reference_hi_master_r, reference_lo_master_r);
   	uint32_t master_now_hi = reference_hi_master_r + now_elapsed_hi;
 		uint32_t master_now_lo = reference_lo_master_r + now_elapsed_lo;
     if (master_now_lo >= max_ns) {
@@ -560,6 +578,8 @@ using namespace dptp;
     uint64_t tx_capture_tstamp;
     uint32_t tx_capture_tstamp_lo;
     const size_t size = 6;
+    uint32_t era = 0;
+    DptpCalcInProgress = true;
 
     for (;i<vec.size();i++) {
       vec[i].get()->getValue(learn_rswitch_id, 1, &switch_id);          
@@ -568,8 +588,9 @@ using namespace dptp;
         printf("Not expecting this switch-id, return!!\n");
       }
       vec[i].get()->getValue(learn_tx_capturets_lo, &capture_resp_tx[switch_id]);      
+#ifdef DEBUG
       printf("capture_resp_tx= %u\n", capture_resp_tx[switch_id]);
-
+#endif
       int reqWireDelay  = s2s_macts_lo[switch_id] - capture_req_tx[switch_id];
       int ReqMacDelay   = s2s_elapsed_lo[switch_id] - s2s_macts_lo[switch_id];
       int replyQueing   = s2s_egts_lo[switch_id] - s2s_elapsed_lo[switch_id];
@@ -580,9 +601,13 @@ using namespace dptp;
       int respWireDelay = now_macts_lo[switch_id] - capture_resp_tx[switch_id];
       int respTDelay = (latency_tx - ReqMacDelay - respDelay)/2 + respDelay + respmacdelay;
 
-      uint32_t calc_time_hi_dptp = s2s_reference_hi_d[switch_id]  + (respTDelay / max_ns);
+      if (updateEra) {
+        era = 65536;
+      } 
+      uint32_t calc_time_hi_dptp = s2s_reference_hi_d[switch_id]  + (respTDelay / max_ns) + era;
 		  uint32_t calc_time_lo_dptp = s2s_reference_lo_d[switch_id]  + (respTDelay % max_ns);
       writeCalcRefTs(calc_time_hi_dptp, calc_time_lo_dptp, now_igts_hi_d[switch_id], now_igts_lo_d[switch_id], switch_id);
+      DptpCalcInProgress = false;
       printf("-------------------------------------------------\n");
       printf("                     Switch %d             \n", switch_id);
       printf("-------------------------------------------------\n");
