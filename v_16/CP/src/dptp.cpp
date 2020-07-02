@@ -131,60 +131,60 @@ using namespace dptp;
   bf_status_t dptp::initRegisterAPI(void) {
     // ts_hi register
     bf_status = bfrtInfo->bfrtTableFromNameGet("ts_hi", &reg_ts_hi);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_hi->keyFieldIdGet("$REGISTER_INDEX", &reg_ts_hi_index);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_hi->dataFieldIdGet("ts_hi.f1", &reg_ts_hi_f1);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = reg_ts_hi->keyAllocate(&reg_ts_hi_key);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_hi->dataAllocate(&reg_ts_hi_data);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, 0);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     // ts_lo register
     bf_status = bfrtInfo->bfrtTableFromNameGet("ts_lo", &reg_ts_lo);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo->keyFieldIdGet("$REGISTER_INDEX", &reg_ts_lo_index);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo->dataFieldIdGet("ts_lo.f1", &reg_ts_lo_f1);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = reg_ts_lo->keyAllocate(&reg_ts_lo_key);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo->dataAllocate(&reg_ts_lo_data);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = reg_ts_lo_key->setValue(reg_ts_lo_index, 0);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     printf("Initialized register APIs\n");
     return BF_SUCCESS;
   }
 
   bf_status_t dptp::writeReferenceTs (const uint64_t ts_hi, const uint64_t ts_lo, uint64_t switch_id) {
     bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, switch_id);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_hi_data->setValue(reg_ts_hi_f1, ts_hi);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo_key->setValue(reg_ts_lo_index, switch_id);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo_data->setValue(reg_ts_lo_f1, ts_lo);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = session->beginTransaction(false);
 
     bf_status = reg_ts_hi->tableEntryMod(*session, dev_tgt, *reg_ts_hi_key, *reg_ts_hi_data);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo->tableEntryMod(*session, dev_tgt, *reg_ts_lo_key, *reg_ts_lo_data);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = session->verifyTransaction();
     bf_status = session->sessionCompleteOperations();
     bf_status = session->commitTransaction(true);
-    return BF_SUCCESS;
+    return bf_status;
   }
 
 
@@ -272,26 +272,27 @@ using namespace dptp;
     bf_status = reg_ts_hi->dataAllocate(&reg_ts_hi_data);
     bf_status = reg_ts_lo->keyAllocate(&reg_ts_lo_key);
     bf_status = reg_ts_lo->dataAllocate(&reg_ts_lo_data);    
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     return BF_SUCCESS;
   }
 
   bf_status_t dptp::readReferenceTs(uint32_t *ts_hi, uint32_t *ts_lo, uint8_t switch_id) {
+    std::vector<uint64_t> ts_lo_val;
+
     bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, (uint64_t)switch_id);
     bf_status = reg_ts_lo_key->setValue(reg_ts_lo_index, (uint64_t)switch_id);
 
     bf_status = reg_ts_hi->tableEntryGet(*session, dev_tgt, *(reg_ts_hi_key.get()), hwflag, reg_ts_hi_data.get());
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     std::vector<uint64_t> ts_hi_val;
     bf_status = reg_ts_hi_data->getValue(reg_ts_hi_f1, &ts_hi_val);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = reg_ts_lo->tableEntryGet(*session, dev_tgt, *(reg_ts_lo_key.get()), hwflag, reg_ts_lo_data.get());
-    assert(bf_status == BF_SUCCESS);
-    std::vector<uint64_t> ts_lo_val;
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo_data->getValue(reg_ts_lo_f1, &ts_lo_val);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     *ts_hi = (uint32_t)ts_hi_val[0];
     *ts_lo = (uint32_t)ts_lo_val[0];
@@ -437,8 +438,7 @@ using namespace dptp;
       sendFollowupPacket(dstAddr, tx_capture_tstamp_lo);
     }
     auto bf_status = bfrtLearnFollowup->bfRtLearnNotifyAck(bfrtsession, learn_msg_hdl);
-    assert(bf_status == BF_SUCCESS);
-    return BF_SUCCESS;
+    return bf_status;
   }
 
   bf_status_t dptp::replyDigestCallback(const bf_rt_target_t &bf_rt_tgt,
@@ -509,8 +509,7 @@ using namespace dptp;
     initReferenceTsAPI();
 
     auto bf_status = bfrtLearnReply->bfRtLearnNotifyAck(bfrtsession, learn_msg_hdl);
-    assert(bf_status == BF_SUCCESS);
-    return BF_SUCCESS;
+    return bf_status;
   }
 
 
@@ -628,53 +627,34 @@ using namespace dptp;
 
 
     auto bf_status = bfrtLearnReplyFop->bfRtLearnNotifyAck(bfrtsession, learn_msg_hdl);
-    assert(bf_status == BF_SUCCESS);
-    return BF_SUCCESS;
+    return bf_status;
   }
 
   bf_status_t dptp::registerDigest (void) {
     bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpIngressDeparser.dptp_followup_digest", &bfrtLearnFollowup);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = bfrtLearnFollowup->learnFieldIdGet("egress_port", &learn_egress_port);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnFollowup->learnFieldIdGet("mac_addr", &learn_mac_addr);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnFollowup->bfRtLearnCallbackRegister(session, dev_tgt, followupDigestCallback, nullptr);
-    assert(bf_status == BF_SUCCESS);
 
     bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpIngressDeparser.dptp_reply_digest", &bfrtLearnReply);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = bfrtLearnReply->learnFieldIdGet("switch_id", &learn_rswitch_id);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("reference_ts_hi", &learn_reference_ts_hi);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("reference_ts_lo", &learn_reference_ts_lo);
-    assert(bf_status == BF_SUCCESS);
-    // bf_status = bfrtLearnReply->learnFieldIdGet("elapsed_hi", &learn_elapsed_hi);
-    // assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("elapsed_lo", &learn_elapsed_lo);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("macts_lo", &learn_macts_lo);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("egts_lo", &learn_egts_lo);
-    assert(bf_status == BF_SUCCESS);
-    // bf_status = bfrtLearnReply->learnFieldIdGet("tx_updts_lo", &learn_tx_updts_lo);
-    // assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("now_macts_lo", &learn_now_macts_lo);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("now_igts_hi", &learn_now_igts_hi);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("now_igts_lo", &learn_now_igts_lo);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->bfRtLearnCallbackRegister(session, dev_tgt, replyDigestCallback, nullptr);
-    assert(bf_status == BF_SUCCESS);
 
     bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpIngressDeparser.dptp_reply_followup_digest", &bfrtLearnReplyFop);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = bfrtLearnReplyFop->learnFieldIdGet("switch_id", &learn_rfswitch_id);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReplyFop->learnFieldIdGet("tx_capturets_lo", &learn_tx_capturets_lo);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReplyFop->bfRtLearnCallbackRegister(session, dev_tgt, replyFollowupDigestCallback, nullptr);
-    assert(bf_status == BF_SUCCESS);
+
+    return bf_status;
   }
