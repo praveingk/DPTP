@@ -1,7 +1,7 @@
 #!/bin/bash
 
 if [ $# -eq 1 ];then
-    profile=test
+    profile=debug
 else
     profile=prod
 fi

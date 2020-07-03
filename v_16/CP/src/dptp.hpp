@@ -80,16 +80,30 @@ namespace dptp {
 							   uint32_t now_elapsed_lo,
 							   uint8_t switch_id);
 
+
+	bf_status_t writeCalcRefTsV2(uint32_t calc_time_hi_dptp,
+							   uint32_t calc_time_lo_dptp,
+							   uint32_t now_elapsed_hi,
+							   uint32_t now_elapsed_lo,
+							   uint8_t switch_id);
+							   
 	bf_status_t sendFollowupPacket(uint8_t *dstAddr, uint32_t tx_capture_tstamp_lo);
 
 	// Entry Functions
-	bf_status_t setUp(void);
+	bf_status_t setUpBfrt(bf_rt_target_t target);
 
 	bf_status_t initRegisterAPI(void);
 
 	bf_status_t initReferenceTs(void);
 
 	bf_status_t createEraThread(void);
+
+	static bf_status_t txComplete(bf_dev_id_t device,
+                  				 bf_pkt_tx_ring_t tx_ring,
+                   				 uint64_t tx_cookie,
+                  				 uint32_t status);
+
+	void callbackRegister(void);
 
 	bf_status_t initPackets(void);
 

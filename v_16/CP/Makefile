@@ -6,8 +6,8 @@ PROGNAME := dptp_main
 ARCH := tofino
 CXXFLAGS = 
 PROFILE := test
-ifeq ($(profile), test)
-	CXXFLAGS += -DTESTPROFILE
+ifeq ($(profile), debug)
+	CXXFLAGS += -DDEBUG
 endif
 SOURCES := src/dptp.cpp src/dptp_main.cpp
 TOFINO_BUILD_DIR = /root/bf-sde-9.1.1/install

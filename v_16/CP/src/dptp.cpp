@@ -110,10 +110,13 @@ using namespace dptp;
   uint32_t now_igts_lo_d[MAX_SWITCHES];
   
   uint32_t max_ns = 1000000000;
-
-  bf_status_t dptp::setUp(void) {
-    dev_tgt.dev_id = 0;
-    dev_tgt.pipe_id = ALL_PIPES;
+  uint64_t max_32bit = 4294967295;
+  uint32_t eraInc = 65536;
+  bool updateEra = false;
+  bool DptpCalcInProgress = false;
+  
+  bf_status_t dptp::setUpBfrt(bf_rt_target_t target) {
+    dev_tgt = target;
     // Get devMgr singleton instance
     auto &devMgr = bfrt::BfRtDevMgr::getInstance();
     // Get bfrtInfo object from dev_id and p4 program name
@@ -127,60 +130,60 @@ using namespace dptp;
   bf_status_t dptp::initRegisterAPI(void) {
     // ts_hi register
     bf_status = bfrtInfo->bfrtTableFromNameGet("ts_hi", &reg_ts_hi);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_hi->keyFieldIdGet("$REGISTER_INDEX", &reg_ts_hi_index);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_hi->dataFieldIdGet("ts_hi.f1", &reg_ts_hi_f1);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = reg_ts_hi->keyAllocate(&reg_ts_hi_key);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_hi->dataAllocate(&reg_ts_hi_data);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, 0);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     // ts_lo register
     bf_status = bfrtInfo->bfrtTableFromNameGet("ts_lo", &reg_ts_lo);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo->keyFieldIdGet("$REGISTER_INDEX", &reg_ts_lo_index);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo->dataFieldIdGet("ts_lo.f1", &reg_ts_lo_f1);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = reg_ts_lo->keyAllocate(&reg_ts_lo_key);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo->dataAllocate(&reg_ts_lo_data);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = reg_ts_lo_key->setValue(reg_ts_lo_index, 0);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     printf("Initialized register APIs\n");
     return BF_SUCCESS;
   }
 
   bf_status_t dptp::writeReferenceTs (const uint64_t ts_hi, const uint64_t ts_lo, uint64_t switch_id) {
     bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, switch_id);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_hi_data->setValue(reg_ts_hi_f1, ts_hi);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo_key->setValue(reg_ts_lo_index, switch_id);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo_data->setValue(reg_ts_lo_f1, ts_lo);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = session->beginTransaction(false);
 
     bf_status = reg_ts_hi->tableEntryMod(*session, dev_tgt, *reg_ts_hi_key, *reg_ts_hi_data);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo->tableEntryMod(*session, dev_tgt, *reg_ts_lo_key, *reg_ts_lo_data);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = session->verifyTransaction();
     bf_status = session->sessionCompleteOperations();
     bf_status = session->commitTransaction(true);
-    return BF_SUCCESS;
+    return bf_status;
   }
 
 
@@ -190,10 +193,7 @@ using namespace dptp;
    */ 
   bf_status_t dptp::initReferenceTs (void) {
     struct timespec tsp;
-    int max_ns = 1000000000;
-    uint64_t max_ns_32 = 4294967296;
     uint64_t reference_ts = 0;
-    uint64_t time_r = 0;
     uint64_t global_ts_ns, baresync_ts_ns;
     uint32_t ts_sec, ts_nsec;
 
@@ -213,7 +213,7 @@ using namespace dptp;
     uint32_t offset_t_hi = (global_ts_ns >> 32) & (uint32_t)0xFFFFFFFF;
     ts_sec  -= offset_t_hi;
     if (ts_nsec < offset_t_lo) {
-      uint64_t ts_nsec_big = (uint64_t)ts_nsec + (uint64_t)max_ns_32;
+      uint64_t ts_nsec_big = (uint64_t)ts_nsec + (uint64_t)max_32bit;
       ts_nsec = (uint32_t)(ts_nsec_big - (uint64_t)offset_t_lo);
       ts_sec -= 1;
     } else {
@@ -222,18 +222,26 @@ using namespace dptp;
     // Write the Registers
     writeReferenceTs((const uint64_t)ts_sec, (const uint64_t)ts_nsec, 0);
 
-    // printf("Setting Time tv_sec = %u, tv_nsec = %u\n", ts_sec, ts_nsec);
-    // time_r = ((time_r | ts_sec) << 32) | ts_nsec;
-    // printf("***** Done ****\n");
     return BF_SUCCESS;
   }
 
+/* Increment Era upon detecting a wrap over of the data-plane timestamp of the switch.
+ * In the master switch, increment Era  
+ * 
+ * This increment Era is an interim update of the reference ts 
+ */
   bf_status_t dptp::incrementEra () {
-    // ts_hi needs to incremented by 0x10000 (65536)
+    printf("Incrementing Era\n");
+    uint32_t ts_hi, ts_lo;
+    readReferenceTs(&ts_hi, &ts_lo, 0);
+    ts_hi += eraInc;
+    writeReferenceTs(ts_hi, ts_lo, 0);
     return BF_SUCCESS;
   }
+
   /* Monitor global_ts, and check for wrap over for era maintenance */
-  void* dptp::eraMaintenance (void *args) {
+  void* dptp::eraMaintenance (void *args)  {
+    // Logic: Take two samples of data-plane timestamp, if latter < former, then wrap over detected
     bf_status_t status;
     uint64_t global_ts_ns_old;
     uint64_t global_ts_ns_new;
@@ -245,9 +253,14 @@ using namespace dptp;
       //printf("%lu,%lu\n", global_ts_ns_old, global_ts_ns_new);
       if (global_ts_ns_new < global_ts_ns_old) {
         // Wrap Detected.
-        incrementEra();
+        // If there is a DPTP calculation in progress, just turn the updateEra flag to true
+        // If not, update it here without further delay
+        updateEra = true;
+        if (!DptpCalcInProgress) {
+          incrementEra();
+        }
       }
-      sleep(2);
+      sleep(1);
     }
   }
   
@@ -262,37 +275,37 @@ using namespace dptp;
     bf_status = reg_ts_hi->dataAllocate(&reg_ts_hi_data);
     bf_status = reg_ts_lo->keyAllocate(&reg_ts_lo_key);
     bf_status = reg_ts_lo->dataAllocate(&reg_ts_lo_data);    
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     return BF_SUCCESS;
   }
 
   bf_status_t dptp::readReferenceTs(uint32_t *ts_hi, uint32_t *ts_lo, uint8_t switch_id) {
+    std::vector<uint64_t> ts_lo_val;
+
     bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, (uint64_t)switch_id);
     bf_status = reg_ts_lo_key->setValue(reg_ts_lo_index, (uint64_t)switch_id);
 
     bf_status = reg_ts_hi->tableEntryGet(*session, dev_tgt, *(reg_ts_hi_key.get()), hwflag, reg_ts_hi_data.get());
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     std::vector<uint64_t> ts_hi_val;
     bf_status = reg_ts_hi_data->getValue(reg_ts_hi_f1, &ts_hi_val);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     bf_status = reg_ts_lo->tableEntryGet(*session, dev_tgt, *(reg_ts_lo_key.get()), hwflag, reg_ts_lo_data.get());
-    assert(bf_status == BF_SUCCESS);
-    std::vector<uint64_t> ts_lo_val;
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_lo_data->getValue(reg_ts_lo_f1, &ts_lo_val);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
 
     *ts_hi = (uint32_t)ts_hi_val[0];
     *ts_lo = (uint32_t)ts_lo_val[0];
-    printf("ts_hi content: %u\n", *ts_hi);
-    printf("ts_lo content: %u\n", *ts_lo);
+
     return BF_SUCCESS;
   }
 
   void* dptp::sendDptpRequests (void *args) {
     int i=0;
-    sleep(3); // Initial packets are lost somehow.
+    
     while (1) {
       printf("Sending DPTP Packets Out..\n");
       bf_status_t stat = bf_pkt_tx(0, bfDptpPkt, tx_ring, (void *)bfDptpPkt);
@@ -369,7 +382,26 @@ using namespace dptp;
 
   }
 
-  bf_status_t dptp::initPackets () {
+	static bf_status_t dptp::txComplete(bf_dev_id_t device,
+					bf_pkt_tx_ring_t tx_ring,
+					uint64_t tx_cookie,
+					uint32_t status) {
+		//bf_pkt *pkt = (bf_pkt *)(uintptr_t)tx_cookie;
+		//bf_pkt_free(device, pkt);
+		return BF_SUCCESS;
+	}
+
+  void dptp::callbackRegister(void) {
+    int tx_ring;
+    /* register callback for TX complete */
+    for (tx_ring = BF_PKT_TX_RING_0; tx_ring < BF_PKT_TX_RING_MAX; tx_ring++) {
+      bf_pkt_tx_done_notif_register(
+        dev_tgt.dev_id, txComplete, (bf_pkt_tx_ring_t)tx_ring);
+    }
+  }
+
+  bf_status_t dptp::initPackets (void) {
+    callbackRegister();
     initRequestPkt();
     initFollowupPkt();
   }
@@ -385,7 +417,9 @@ using namespace dptp;
     if (stat  != BF_SUCCESS) {
       printf("Failed to send packet status=%s\n", bf_err_str(stat));
     } else {
+#ifdef DEBUG
       printf("Packet sent successfully capture_tx=%x\n", htonl(tx_capture_tstamp_lo));
+#endif
     }
     return BF_SUCCESS;
   }
@@ -408,10 +442,11 @@ using namespace dptp;
 
     for (;i<vec.size();i++) {
       vec[i].get()->getValue(learn_egress_port, &egress_port);          
-      //vec[0].get()->getValue(learn_mac_addr, &mac_addr);
       vec[i].get()->getValue(learn_mac_addr, size, dstAddr);
+#ifdef DEBUG
       printf("Egress port = %u\n", egress_port);  
       printf("Mac Addr    = %X %X %X %X %X %X\n", dstAddr[0],dstAddr[1],dstAddr[2],dstAddr[3],dstAddr[4], dstAddr[5]);  
+#endif
       ts_valid = 0;
 		  int j = 1;
 		  while (ts_valid == 0) {
@@ -422,8 +457,7 @@ using namespace dptp;
       sendFollowupPacket(dstAddr, tx_capture_tstamp_lo);
     }
     auto bf_status = bfrtLearnFollowup->bfRtLearnNotifyAck(bfrtsession, learn_msg_hdl);
-    assert(bf_status == BF_SUCCESS);
-    return BF_SUCCESS;
+    return bf_status;
   }
 
   bf_status_t dptp::replyDigestCallback(const bf_rt_target_t &bf_rt_tgt,
@@ -432,14 +466,16 @@ using namespace dptp;
                             bf_rt_learn_msg_hdl *const learn_msg_hdl,
                             const void *cookie) {
     uint8_t switch_id = 0;
-	bf_dev_port_t reqport = 160;
+    bf_dev_port_t reqport = 160;
     int i= 0;
     int ts_id;
     bool ts_valid;
 
     for (;i<vec.size();i++) {
-      vec[i].get()->getValue(learn_rswitch_id, 1, &switch_id);          
+      vec[i].get()->getValue(learn_rswitch_id, 1, &switch_id);   
+#ifdef DEBUG       
       printf("Reply received on switch %d\n", switch_id);
+#endif
       if (switch_id > MAX_SWITCHES) {
         printf("Not expecting this switch-id, return!!\n");
         return BF_UNEXPECTED;
@@ -451,7 +487,7 @@ using namespace dptp;
         default:
           printf("Unexpected Case!\n");
           return BF_UNEXPECTED;
-	  }
+      }
       bf_port_1588_timestamp_tx_get((bf_dev_id_t) 0, reqport, &capture_req_tx[switch_id], &ts_valid, &ts_id);
       vec[i].get()->getValue(learn_reference_ts_hi, &s2s_reference_hi[switch_id]);          
       vec[i].get()->getValue(learn_reference_ts_lo, &s2s_reference_lo[switch_id]);          
@@ -462,21 +498,22 @@ using namespace dptp;
       vec[i].get()->getValue(learn_now_macts_lo, &now_macts_lo[switch_id]);   
       vec[i].get()->getValue(learn_now_igts_hi, &now_igts_hi[switch_id]);   
       vec[i].get()->getValue(learn_now_igts_lo, &now_igts_lo[switch_id]);
-      uint64_t reference_ts_c = 0;
-      reference_ts_c = ((reference_ts_c | (uint32_t)s2s_reference_hi[switch_id]) << 32) | (uint32_t)s2s_reference_lo[switch_id];
-      uint32_t a = reference_ts_c / max_ns;
-      uint32_t b = reference_ts_c % max_ns;
-      s2s_reference_hi_d[switch_id] = a;
-      s2s_reference_lo_d[switch_id] = b;
-  	  uint64_t now_igts_c = 0;
-	  now_igts_c = ((now_igts_c | now_igts_hi[switch_id]) << 32) | now_igts_lo[switch_id];
-      a = now_igts_c / max_ns;
-      b = now_igts_c % max_ns;
-      now_igts_hi_d[switch_id] = a;
-      now_igts_lo_d[switch_id] = b;
 
+      // uint64_t reference_ts_c = 0;
+      // reference_ts_c = ((reference_ts_c | (uint32_t)s2s_reference_hi[switch_id]) << 32) | (uint32_t)s2s_reference_lo[switch_id];
+      // uint32_t a = reference_ts_c / max_ns;
+      // uint32_t b = reference_ts_c % max_ns;
+      // s2s_reference_hi_d[switch_id] = a;
+      // s2s_reference_lo_d[switch_id] = b;
+  	  // uint64_t now_igts_c = 0;
+      // now_igts_c = ((now_igts_c | now_igts_hi[switch_id]) << 32) | now_igts_lo[switch_id];
+      // a = now_igts_c / max_ns;
+      // b = now_igts_c % max_ns;
+      // now_igts_hi_d[switch_id] = a;
+      // now_igts_lo_d[switch_id] = b;
+
+#ifdef DEBUG
       printf("Reference_hi   = %u, Reference_lo   =%u\n", s2s_reference_hi[switch_id], s2s_reference_lo[switch_id]);
-      printf("Reference TS   = %lu\n", reference_ts_c);
       printf("Reference_hi_d = %u, Reference_lo_d =%u\n", s2s_reference_hi_d[switch_id], s2s_reference_lo_d[switch_id]);
       printf("capture_req_tx = %u\n", (capture_req_tx[switch_id] & 0xFFFFFFFF));
       printf("s2s_macts_lo   = %u\n", s2s_macts_lo[switch_id]);
@@ -485,16 +522,14 @@ using namespace dptp;
       printf("now_macts_lo   = %u\n", now_macts_lo[switch_id]); 
       printf("now_igts_lo    = %u\n", now_igts_lo[switch_id]); 
       printf("now_igts_hi_d  = %u, now_igts_lo_d = %u\n", now_igts_hi_d[switch_id], now_igts_lo_d[switch_id]); 
-
+#endif
     }
 
     initReferenceTsAPI();
 
     auto bf_status = bfrtLearnReply->bfRtLearnNotifyAck(bfrtsession, learn_msg_hdl);
-    assert(bf_status == BF_SUCCESS);
-    return BF_SUCCESS;
+    return bf_status;
   }
-
 
 
   bf_status_t dptp::writeCalcRefTs (uint32_t calc_time_hi_dptp, 
@@ -505,14 +540,12 @@ using namespace dptp;
     uint64_t ref_calc_time_hi  = calc_time_hi_dptp - now_elapsed_hi;
     uint64_t ref_calc_time_lo;
     if (calc_time_lo_dptp < now_elapsed_lo) {
-      ref_calc_time_lo = (calc_time_lo_dptp + max_ns) - now_elapsed_lo;
+      printf("dptp calc overflow\n");
+      ref_calc_time_lo = ((uint64_t)calc_time_lo_dptp + (uint64_t)max_32bit) - now_elapsed_lo;
       ref_calc_time_hi -= 1;
     } else {
       ref_calc_time_lo  = calc_time_lo_dptp - now_elapsed_lo;
-    }
-    uint64_t reference_ts = ((uint64_t)ref_calc_time_hi * (uint64_t)max_ns) + ref_calc_time_lo;
-    ref_calc_time_hi = (reference_ts >> 32) & 0xFFFFFFFF;
-    ref_calc_time_lo = reference_ts & 0xFFFFFFFF;        
+    }    
     writeReferenceTs(ref_calc_time_hi, ref_calc_time_lo, (uint64_t)switch_id);           
   }
 
@@ -526,16 +559,23 @@ using namespace dptp;
     uint64_t reference_ts_master = 0;
     initReferenceTsAPI();
     readReferenceTs(&master_ts_hi, &master_ts_lo, master_switch);
-    reference_ts_master = ((reference_ts_master | master_ts_hi) << 32) | master_ts_lo;
-    uint32_t reference_hi_master_r = reference_ts_master / max_ns;
-    uint32_t reference_lo_master_r = reference_ts_master % max_ns;
 
-    printf("ref %u,%u\n", reference_hi_master_r, reference_lo_master_r);
-  	uint32_t master_now_hi = reference_hi_master_r + now_elapsed_hi;
-		uint32_t master_now_lo = reference_lo_master_r + now_elapsed_lo;
-    if (master_now_lo >= max_ns) {
-      //printf("orig_time_lo Wrapup!\n");
-      master_now_lo -= max_ns;
+  	uint32_t master_now_hi = master_ts_hi + now_elapsed_hi;
+		uint64_t master_now_lo = (uint64_t)master_ts_lo + (uint64_t)now_elapsed_lo;
+
+#ifdef DEBUG
+    printf("Master ts hi = %u ns\n", master_ts_hi);
+    printf("now ig ts     = %u ns\n", now_elapsed_hi);
+
+    printf("Master ts lo = %u ns\n", master_ts_lo);
+    printf("now ig ts     = %u ns\n", now_elapsed_lo);
+#endif
+
+    if (master_now_lo > max_32bit) {
+#ifdef DEBUG
+      printf("orig_time_lo Wrapup!\n");
+#endif
+      master_now_lo -= max_32bit;
       master_now_hi += 1;
     }
     printf("calc_time_hi(Ground Truth) = %u s, calc_time_lo(Ground Truth) = %u ns\n", master_now_hi, master_now_lo);
@@ -560,16 +600,21 @@ using namespace dptp;
     uint64_t tx_capture_tstamp;
     uint32_t tx_capture_tstamp_lo;
     const size_t size = 6;
+    uint32_t era = 0;
+    DptpCalcInProgress = true;
 
     for (;i<vec.size();i++) {
       vec[i].get()->getValue(learn_rswitch_id, 1, &switch_id);          
-      //printf("Reply Followup received on switch %d\n", switch_id);
+#ifdef DEBUG
+      printf("Reply Followup received on switch %d\n", switch_id);
+#endif
       if (switch_id > MAX_SWITCHES) {
         printf("Not expecting this switch-id, return!!\n");
       }
       vec[i].get()->getValue(learn_tx_capturets_lo, &capture_resp_tx[switch_id]);      
+#ifdef DEBUG
       printf("capture_resp_tx= %u\n", capture_resp_tx[switch_id]);
-
+#endif
       int reqWireDelay  = s2s_macts_lo[switch_id] - capture_req_tx[switch_id];
       int ReqMacDelay   = s2s_elapsed_lo[switch_id] - s2s_macts_lo[switch_id];
       int replyQueing   = s2s_egts_lo[switch_id] - s2s_elapsed_lo[switch_id];
@@ -580,9 +625,17 @@ using namespace dptp;
       int respWireDelay = now_macts_lo[switch_id] - capture_resp_tx[switch_id];
       int respTDelay = (latency_tx - ReqMacDelay - respDelay)/2 + respDelay + respmacdelay;
 
-      uint32_t calc_time_hi_dptp = s2s_reference_hi_d[switch_id]  + (respTDelay / max_ns);
-		  uint32_t calc_time_lo_dptp = s2s_reference_lo_d[switch_id]  + (respTDelay % max_ns);
-      writeCalcRefTs(calc_time_hi_dptp, calc_time_lo_dptp, now_igts_hi_d[switch_id], now_igts_lo_d[switch_id], switch_id);
+      if (updateEra) {
+        era = eraInc;
+      } 
+
+      uint32_t calc_time_hi_dptp = s2s_reference_hi[switch_id]  + (respTDelay / max_ns) + era;
+		  uint32_t calc_time_lo_dptp = s2s_reference_lo[switch_id]  + (respTDelay % max_ns);
+
+      writeCalcRefTs(calc_time_hi_dptp, calc_time_lo_dptp, now_igts_hi[switch_id], now_igts_lo[switch_id], switch_id);
+
+      DptpCalcInProgress = false;
+      updateEra = false;
       printf("-------------------------------------------------\n");
       printf("                     Switch %d             \n", switch_id);
       printf("-------------------------------------------------\n");
@@ -597,59 +650,38 @@ using namespace dptp;
       printf("Total RTT (RespRx - ReqTx)        = %d ns\n", latency_tx);
       printf("Total Response Delay              = %d ns\n", respTDelay);
       printf("-------------------------------------------------\n");
-      reportDptpError(calc_time_hi_dptp, calc_time_lo_dptp, now_igts_hi_d[switch_id], now_igts_lo_d[switch_id], 0);
-      // reportStats()
+      reportDptpError(calc_time_hi_dptp, calc_time_lo_dptp, now_igts_hi[switch_id], now_igts_lo[switch_id], 0);
     }
 
-
     auto bf_status = bfrtLearnReplyFop->bfRtLearnNotifyAck(bfrtsession, learn_msg_hdl);
-    assert(bf_status == BF_SUCCESS);
-    return BF_SUCCESS;
+    return bf_status;
   }
 
   bf_status_t dptp::registerDigest (void) {
     bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpIngressDeparser.dptp_followup_digest", &bfrtLearnFollowup);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = bfrtLearnFollowup->learnFieldIdGet("egress_port", &learn_egress_port);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnFollowup->learnFieldIdGet("mac_addr", &learn_mac_addr);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnFollowup->bfRtLearnCallbackRegister(session, dev_tgt, followupDigestCallback, nullptr);
-    assert(bf_status == BF_SUCCESS);
 
     bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpIngressDeparser.dptp_reply_digest", &bfrtLearnReply);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = bfrtLearnReply->learnFieldIdGet("switch_id", &learn_rswitch_id);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("reference_ts_hi", &learn_reference_ts_hi);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("reference_ts_lo", &learn_reference_ts_lo);
-    assert(bf_status == BF_SUCCESS);
-    // bf_status = bfrtLearnReply->learnFieldIdGet("elapsed_hi", &learn_elapsed_hi);
-    // assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("elapsed_lo", &learn_elapsed_lo);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("macts_lo", &learn_macts_lo);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("egts_lo", &learn_egts_lo);
-    assert(bf_status == BF_SUCCESS);
-    // bf_status = bfrtLearnReply->learnFieldIdGet("tx_updts_lo", &learn_tx_updts_lo);
-    // assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("now_macts_lo", &learn_now_macts_lo);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("now_igts_hi", &learn_now_igts_hi);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->learnFieldIdGet("now_igts_lo", &learn_now_igts_lo);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReply->bfRtLearnCallbackRegister(session, dev_tgt, replyDigestCallback, nullptr);
-    assert(bf_status == BF_SUCCESS);
 
     bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpIngressDeparser.dptp_reply_followup_digest", &bfrtLearnReplyFop);
-    assert(bf_status == BF_SUCCESS);
+    if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = bfrtLearnReplyFop->learnFieldIdGet("switch_id", &learn_rfswitch_id);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReplyFop->learnFieldIdGet("tx_capturets_lo", &learn_tx_capturets_lo);
-    assert(bf_status == BF_SUCCESS);
     bf_status = bfrtLearnReplyFop->bfRtLearnCallbackRegister(session, dev_tgt, replyFollowupDigestCallback, nullptr);
-    assert(bf_status == BF_SUCCESS);
+
+    return bf_status;
   }
