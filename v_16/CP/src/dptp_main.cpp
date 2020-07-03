@@ -98,42 +98,37 @@ void init_ports() {
 	}
 }
 
-static bf_status_t txComplete(bf_dev_id_t device,
-							  bf_pkt_tx_ring_t tx_ring,
-							  uint64_t tx_cookie,
-							  uint32_t status) {
-	//bf_pkt *pkt = (bf_pkt *)(uintptr_t)tx_cookie;
-	//bf_pkt_free(device, pkt);
-	return BF_SUCCESS;
-}
-void callbackRegister(bf_dev_id_t device) {
-	int tx_ring;
-	/* register callback for TX complete */
-	for (tx_ring = BF_PKT_TX_RING_0; tx_ring < BF_PKT_TX_RING_MAX; tx_ring++) {
-		bf_pkt_tx_done_notif_register(
-			device, txComplete, (bf_pkt_tx_ring_t)tx_ring);
-	}
-}
 
 int main(int argc, char **argv) {
+	bf_rt_target_t dev_tgt;
 	// Start the BF Switchd
 	init_bf_switchd();
 	// Initialize the switch ports and data-plane MATs
 	getSwitchName();
 	init_ports();
 	init_tables();
+
 	printf("Starting dptp_topo Control Plane Unit ..\n");
-	dptp::setUp();
+
+	// Initialize the device id and pipelines to be used for DPTP
+    dev_tgt.dev_id = 0;
+    dev_tgt.pipe_id = ALL_PIPES;
+	// Setup bfrt runtime APIs and then the register APIs which will be used to read/write registers (reference)
+	dptp::setUpBfrt(dev_tgt);
 	dptp::initRegisterAPI();
 
+	// Initialize packets (request,followup) and register digest for followup generation, reply and reply followup packets.
+	dptp::initPackets();
+	dptp::registerDigest();
+
+	// Master Switch which has the Clock Reference
 	dptp::initReferenceTs();
 	dptp::createEraThread();
 
-	callbackRegister(0);
-
-	dptp::initPackets();
-	dptp::registerDigest();
+	// Other Switches which needs the Clock Reference
 	dptp::createDptpRequestThread();
+
+	// Wait on the threads so that DPTP runs in the background
 	dptp::waitOnThreads();
 	return 0;
 }

@@ -110,14 +110,13 @@ using namespace dptp;
   uint32_t now_igts_lo_d[MAX_SWITCHES];
   
   uint32_t max_ns = 1000000000;
-
+  uint64_t max_32bit = 4294967295;
+  uint32_t eraInc = 65536;
   bool updateEra = false;
   bool DptpCalcInProgress = false;
-
-
-  bf_status_t dptp::setUp(void) {
-    dev_tgt.dev_id = 0;
-    dev_tgt.pipe_id = ALL_PIPES;
+  
+  bf_status_t dptp::setUpBfrt(bf_rt_target_t target) {
+    dev_tgt = target;
     // Get devMgr singleton instance
     auto &devMgr = bfrt::BfRtDevMgr::getInstance();
     // Get bfrtInfo object from dev_id and p4 program name
@@ -194,10 +193,7 @@ using namespace dptp;
    */ 
   bf_status_t dptp::initReferenceTs (void) {
     struct timespec tsp;
-    int max_ns = 1000000000;
-    uint64_t max_ns_32 = 4294967296;
     uint64_t reference_ts = 0;
-    uint64_t time_r = 0;
     uint64_t global_ts_ns, baresync_ts_ns;
     uint32_t ts_sec, ts_nsec;
 
@@ -217,7 +213,7 @@ using namespace dptp;
     uint32_t offset_t_hi = (global_ts_ns >> 32) & (uint32_t)0xFFFFFFFF;
     ts_sec  -= offset_t_hi;
     if (ts_nsec < offset_t_lo) {
-      uint64_t ts_nsec_big = (uint64_t)ts_nsec + (uint64_t)max_ns_32;
+      uint64_t ts_nsec_big = (uint64_t)ts_nsec + (uint64_t)max_32bit;
       ts_nsec = (uint32_t)(ts_nsec_big - (uint64_t)offset_t_lo);
       ts_sec -= 1;
     } else {
@@ -226,17 +222,23 @@ using namespace dptp;
     // Write the Registers
     writeReferenceTs((const uint64_t)ts_sec, (const uint64_t)ts_nsec, 0);
 
-    // printf("Setting Time tv_sec = %u, tv_nsec = %u\n", ts_sec, ts_nsec);
-    // time_r = ((time_r | ts_sec) << 32) | ts_nsec;
-    // printf("***** Done ****\n");
     return BF_SUCCESS;
   }
 
 /* Increment Era upon detecting a wrap over of the data-plane timestamp of the switch.
+ * In the master switch, increment Era  
+ * 
+ * This increment Era is an interim update of the reference ts 
  */
   bf_status_t dptp::incrementEra () {
+    printf("Incrementing Era\n");
+    uint32_t ts_hi, ts_lo;
+    readReferenceTs(&ts_hi, &ts_lo, 0);
+    ts_hi += eraInc;
+    writeReferenceTs(ts_hi, ts_lo, 0);
     return BF_SUCCESS;
   }
+
   /* Monitor global_ts, and check for wrap over for era maintenance */
   void* dptp::eraMaintenance (void *args)  {
     // Logic: Take two samples of data-plane timestamp, if latter < former, then wrap over detected
@@ -251,13 +253,14 @@ using namespace dptp;
       //printf("%lu,%lu\n", global_ts_ns_old, global_ts_ns_new);
       if (global_ts_ns_new < global_ts_ns_old) {
         // Wrap Detected.
-        if (DptpCalcInProgress) {
-          updateEra = true;
-        } else {
+        // If there is a DPTP calculation in progress, just turn the updateEra flag to true
+        // If not, update it here without further delay
+        updateEra = true;
+        if (!DptpCalcInProgress) {
           incrementEra();
         }
       }
-      sleep(2);
+      sleep(1);
     }
   }
   
@@ -296,16 +299,13 @@ using namespace dptp;
 
     *ts_hi = (uint32_t)ts_hi_val[0];
     *ts_lo = (uint32_t)ts_lo_val[0];
-#ifdef DEBUG
-    printf("ts_hi content: %u\n", *ts_hi);
-    printf("ts_lo content: %u\n", *ts_lo);
-#endif
+
     return BF_SUCCESS;
   }
 
   void* dptp::sendDptpRequests (void *args) {
     int i=0;
-    sleep(3); // Initial packets are lost somehow.
+    
     while (1) {
       printf("Sending DPTP Packets Out..\n");
       bf_status_t stat = bf_pkt_tx(0, bfDptpPkt, tx_ring, (void *)bfDptpPkt);
@@ -382,7 +382,26 @@ using namespace dptp;
 
   }
 
-  bf_status_t dptp::initPackets () {
+	static bf_status_t dptp::txComplete(bf_dev_id_t device,
+					bf_pkt_tx_ring_t tx_ring,
+					uint64_t tx_cookie,
+					uint32_t status) {
+		//bf_pkt *pkt = (bf_pkt *)(uintptr_t)tx_cookie;
+		//bf_pkt_free(device, pkt);
+		return BF_SUCCESS;
+	}
+
+  void dptp::callbackRegister(void) {
+    int tx_ring;
+    /* register callback for TX complete */
+    for (tx_ring = BF_PKT_TX_RING_0; tx_ring < BF_PKT_TX_RING_MAX; tx_ring++) {
+      bf_pkt_tx_done_notif_register(
+        dev_tgt.dev_id, txComplete, (bf_pkt_tx_ring_t)tx_ring);
+    }
+  }
+
+  bf_status_t dptp::initPackets (void) {
+    callbackRegister();
     initRequestPkt();
     initFollowupPkt();
   }
@@ -479,22 +498,22 @@ using namespace dptp;
       vec[i].get()->getValue(learn_now_macts_lo, &now_macts_lo[switch_id]);   
       vec[i].get()->getValue(learn_now_igts_hi, &now_igts_hi[switch_id]);   
       vec[i].get()->getValue(learn_now_igts_lo, &now_igts_lo[switch_id]);
-      uint64_t reference_ts_c = 0;
-      reference_ts_c = ((reference_ts_c | (uint32_t)s2s_reference_hi[switch_id]) << 32) | (uint32_t)s2s_reference_lo[switch_id];
-      uint32_t a = reference_ts_c / max_ns;
-      uint32_t b = reference_ts_c % max_ns;
-      s2s_reference_hi_d[switch_id] = a;
-      s2s_reference_lo_d[switch_id] = b;
-  	  uint64_t now_igts_c = 0;
-      now_igts_c = ((now_igts_c | now_igts_hi[switch_id]) << 32) | now_igts_lo[switch_id];
-      a = now_igts_c / max_ns;
-      b = now_igts_c % max_ns;
-      now_igts_hi_d[switch_id] = a;
-      now_igts_lo_d[switch_id] = b;
+
+      // uint64_t reference_ts_c = 0;
+      // reference_ts_c = ((reference_ts_c | (uint32_t)s2s_reference_hi[switch_id]) << 32) | (uint32_t)s2s_reference_lo[switch_id];
+      // uint32_t a = reference_ts_c / max_ns;
+      // uint32_t b = reference_ts_c % max_ns;
+      // s2s_reference_hi_d[switch_id] = a;
+      // s2s_reference_lo_d[switch_id] = b;
+  	  // uint64_t now_igts_c = 0;
+      // now_igts_c = ((now_igts_c | now_igts_hi[switch_id]) << 32) | now_igts_lo[switch_id];
+      // a = now_igts_c / max_ns;
+      // b = now_igts_c % max_ns;
+      // now_igts_hi_d[switch_id] = a;
+      // now_igts_lo_d[switch_id] = b;
 
 #ifdef DEBUG
       printf("Reference_hi   = %u, Reference_lo   =%u\n", s2s_reference_hi[switch_id], s2s_reference_lo[switch_id]);
-      printf("Reference TS   = %lu\n", reference_ts_c);
       printf("Reference_hi_d = %u, Reference_lo_d =%u\n", s2s_reference_hi_d[switch_id], s2s_reference_lo_d[switch_id]);
       printf("capture_req_tx = %u\n", (capture_req_tx[switch_id] & 0xFFFFFFFF));
       printf("s2s_macts_lo   = %u\n", s2s_macts_lo[switch_id]);
@@ -513,7 +532,6 @@ using namespace dptp;
   }
 
 
-
   bf_status_t dptp::writeCalcRefTs (uint32_t calc_time_hi_dptp, 
                        uint32_t calc_time_lo_dptp, 
                        uint32_t now_elapsed_hi, 
@@ -522,14 +540,12 @@ using namespace dptp;
     uint64_t ref_calc_time_hi  = calc_time_hi_dptp - now_elapsed_hi;
     uint64_t ref_calc_time_lo;
     if (calc_time_lo_dptp < now_elapsed_lo) {
-      ref_calc_time_lo = (calc_time_lo_dptp + max_ns) - now_elapsed_lo;
+      printf("dptp calc overflow\n");
+      ref_calc_time_lo = ((uint64_t)calc_time_lo_dptp + (uint64_t)max_32bit) - now_elapsed_lo;
       ref_calc_time_hi -= 1;
     } else {
       ref_calc_time_lo  = calc_time_lo_dptp - now_elapsed_lo;
-    }
-    uint64_t reference_ts = ((uint64_t)ref_calc_time_hi * (uint64_t)max_ns) + ref_calc_time_lo;
-    ref_calc_time_hi = (reference_ts >> 32) & 0xFFFFFFFF;
-    ref_calc_time_lo = reference_ts & 0xFFFFFFFF;        
+    }    
     writeReferenceTs(ref_calc_time_hi, ref_calc_time_lo, (uint64_t)switch_id);           
   }
 
@@ -543,16 +559,23 @@ using namespace dptp;
     uint64_t reference_ts_master = 0;
     initReferenceTsAPI();
     readReferenceTs(&master_ts_hi, &master_ts_lo, master_switch);
-    reference_ts_master = ((reference_ts_master | master_ts_hi) << 32) | master_ts_lo;
-    uint32_t reference_hi_master_r = reference_ts_master / max_ns;
-    uint32_t reference_lo_master_r = reference_ts_master % max_ns;
 
-    //printf("ref %u,%u\n", reference_hi_master_r, reference_lo_master_r);
-  	uint32_t master_now_hi = reference_hi_master_r + now_elapsed_hi;
-		uint32_t master_now_lo = reference_lo_master_r + now_elapsed_lo;
-    if (master_now_lo >= max_ns) {
-      //printf("orig_time_lo Wrapup!\n");
-      master_now_lo -= max_ns;
+  	uint32_t master_now_hi = master_ts_hi + now_elapsed_hi;
+		uint64_t master_now_lo = (uint64_t)master_ts_lo + (uint64_t)now_elapsed_lo;
+
+#ifdef DEBUG
+    printf("Master ts hi = %u ns\n", master_ts_hi);
+    printf("now ig ts     = %u ns\n", now_elapsed_hi);
+
+    printf("Master ts lo = %u ns\n", master_ts_lo);
+    printf("now ig ts     = %u ns\n", now_elapsed_lo);
+#endif
+
+    if (master_now_lo > max_32bit) {
+#ifdef DEBUG
+      printf("orig_time_lo Wrapup!\n");
+#endif
+      master_now_lo -= max_32bit;
       master_now_hi += 1;
     }
     printf("calc_time_hi(Ground Truth) = %u s, calc_time_lo(Ground Truth) = %u ns\n", master_now_hi, master_now_lo);
@@ -582,7 +605,9 @@ using namespace dptp;
 
     for (;i<vec.size();i++) {
       vec[i].get()->getValue(learn_rswitch_id, 1, &switch_id);          
-      //printf("Reply Followup received on switch %d\n", switch_id);
+#ifdef DEBUG
+      printf("Reply Followup received on switch %d\n", switch_id);
+#endif
       if (switch_id > MAX_SWITCHES) {
         printf("Not expecting this switch-id, return!!\n");
       }
@@ -601,12 +626,16 @@ using namespace dptp;
       int respTDelay = (latency_tx - ReqMacDelay - respDelay)/2 + respDelay + respmacdelay;
 
       if (updateEra) {
-        era = 65536;
+        era = eraInc;
       } 
-      uint32_t calc_time_hi_dptp = s2s_reference_hi_d[switch_id]  + (respTDelay / max_ns) + era;
-		  uint32_t calc_time_lo_dptp = s2s_reference_lo_d[switch_id]  + (respTDelay % max_ns);
-      writeCalcRefTs(calc_time_hi_dptp, calc_time_lo_dptp, now_igts_hi_d[switch_id], now_igts_lo_d[switch_id], switch_id);
+
+      uint32_t calc_time_hi_dptp = s2s_reference_hi[switch_id]  + (respTDelay / max_ns) + era;
+		  uint32_t calc_time_lo_dptp = s2s_reference_lo[switch_id]  + (respTDelay % max_ns);
+
+      writeCalcRefTs(calc_time_hi_dptp, calc_time_lo_dptp, now_igts_hi[switch_id], now_igts_lo[switch_id], switch_id);
+
       DptpCalcInProgress = false;
+      updateEra = false;
       printf("-------------------------------------------------\n");
       printf("                     Switch %d             \n", switch_id);
       printf("-------------------------------------------------\n");
@@ -621,10 +650,8 @@ using namespace dptp;
       printf("Total RTT (RespRx - ReqTx)        = %d ns\n", latency_tx);
       printf("Total Response Delay              = %d ns\n", respTDelay);
       printf("-------------------------------------------------\n");
-      reportDptpError(calc_time_hi_dptp, calc_time_lo_dptp, now_igts_hi_d[switch_id], now_igts_lo_d[switch_id], 0);
-      // reportStats()
+      reportDptpError(calc_time_hi_dptp, calc_time_lo_dptp, now_igts_hi[switch_id], now_igts_lo[switch_id], 0);
     }
-
 
     auto bf_status = bfrtLearnReplyFop->bfRtLearnNotifyAck(bfrtsession, learn_msg_hdl);
     return bf_status;
