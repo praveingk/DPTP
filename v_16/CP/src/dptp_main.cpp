@@ -37,13 +37,13 @@ extern "C"
 #define THRIFT_PORT_NUM 7777
 int switchid = 0;
 
-void init_bf_switchd() {
+void init_bf_switchd(const char* progname) {
 	bf_switchd_context_t *switchd_main_ctx = NULL;
 	char *install_dir;	
 	char target_conf_file[100];
 	bf_status_t bf_status;
 	install_dir = getenv("SDE_INSTALL");
-	sprintf(target_conf_file, "%s/share/p4/targets/tofino/dptp.conf", install_dir);
+	sprintf(target_conf_file, "%s/share/p4/targets/tofino/%s.conf", install_dir, progname);
 
 	/* Allocate memory to hold switchd configuration and state */
 	if ((switchd_main_ctx = (bf_switchd_context_t *)calloc(1, sizeof(bf_switchd_context_t))) == NULL) {
@@ -100,9 +100,10 @@ void init_ports() {
 
 
 int main(int argc, char **argv) {
+	const char *progname = "dptp_switch";
 	bf_rt_target_t dev_tgt;
 	// Start the BF Switchd
-	init_bf_switchd();
+	init_bf_switchd(progname);
 	// Initialize the switch ports and data-plane MATs
 	getSwitchName();
 	init_ports();
@@ -114,7 +115,7 @@ int main(int argc, char **argv) {
     dev_tgt.dev_id = 0;
     dev_tgt.pipe_id = ALL_PIPES;
 	// Setup bfrt runtime APIs and then the register APIs which will be used to read/write registers (reference)
-	dptp::setUpBfrt(dev_tgt);
+	dptp::setUpBfrt(dev_tgt, progname);
 	dptp::initRegisterAPI();
 
 	// Initialize packets (request,followup) and register digest for followup generation, reply and reply followup packets.

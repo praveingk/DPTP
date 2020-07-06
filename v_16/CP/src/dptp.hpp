@@ -42,55 +42,8 @@ extern "C"
 #define DPTP_CAPTURE_COMMAND 0x6
 
 namespace dptp {
-	// Utility Functions
-
-	bf_status_t writeReferenceTs(const uint64_t ts_hi, const uint64_t ts_lo, uint64_t switch_id);
-
-	bf_status_t incrementEra(void);
-
-	void *eraMaintenance(void *args);
-
-	void *sendDptpRequests(void *args);
-
-	bf_status_t initReferenceTsAPI(void);
-
-	bf_status_t readReferenceTs(uint32_t *ts_hi, uint32_t *ts_lo, uint8_t switch_id);
-
-	bf_status_t reportDptpError(uint32_t calc_time_hi, uint32_t calc_time_lo, uint32_t now_elapsed_hi, uint32_t now_elapsed_lo, uint8_t master_switch);
-
-	bf_status_t initRequestPkt(void);
-
-	bf_status_t initFollowupPkt(void);
-
-	bf_status_t replyDigestCallback(const bf_rt_target_t &bf_rt_tgt,
-									const std::shared_ptr<bfrt::BfRtSession> bfrtsession,
-									std::vector<std::unique_ptr<bfrt::BfRtLearnData>> vec,
-									bf_rt_learn_msg_hdl *const learn_msg_hdl,
-									const void *cookie);
-
-	bf_status_t replyFollowupDigestCallback(const bf_rt_target_t &bf_rt_tgt,
-											const std::shared_ptr<bfrt::BfRtSession> bfrtsession,
-											std::vector<std::unique_ptr<bfrt::BfRtLearnData>> vec,
-											bf_rt_learn_msg_hdl *const learn_msg_hdl,
-											const void *cookie);
-
-	bf_status_t writeCalcRefTs(uint32_t calc_time_hi_dptp,
-							   uint32_t calc_time_lo_dptp,
-							   uint32_t now_elapsed_hi,
-							   uint32_t now_elapsed_lo,
-							   uint8_t switch_id);
-
-
-	bf_status_t writeCalcRefTsV2(uint32_t calc_time_hi_dptp,
-							   uint32_t calc_time_lo_dptp,
-							   uint32_t now_elapsed_hi,
-							   uint32_t now_elapsed_lo,
-							   uint8_t switch_id);
-							   
-	bf_status_t sendFollowupPacket(uint8_t *dstAddr, uint32_t tx_capture_tstamp_lo);
-
 	// Entry Functions
-	bf_status_t setUpBfrt(bf_rt_target_t target);
+	bf_status_t setUpBfrt(bf_rt_target_t target, const char *progname);
 
 	bf_status_t initRegisterAPI(void);
 

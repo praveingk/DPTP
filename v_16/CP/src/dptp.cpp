@@ -114,13 +114,54 @@ using namespace dptp;
   uint32_t eraInc = 65536;
   bool updateEra = false;
   bool DptpCalcInProgress = false;
-  
-  bf_status_t dptp::setUpBfrt(bf_rt_target_t target) {
+
+	// Utility Functions
+	bf_status_t writeReferenceTs(const uint64_t ts_hi, const uint64_t ts_lo, uint64_t switch_id);
+
+	bf_status_t incrementEra(void);
+
+	void *eraMaintenance(void *args);
+
+	void *sendDptpRequests(void *args);
+
+	bf_status_t initReferenceTsAPI(void);
+
+	bf_status_t readReferenceTs(uint32_t *ts_hi, uint32_t *ts_lo, uint8_t switch_id);
+
+	bf_status_t reportDptpError(uint32_t calc_time_hi, uint32_t calc_time_lo, uint32_t now_elapsed_hi, uint32_t now_elapsed_lo, uint8_t master_switch);
+
+	bf_status_t initRequestPkt(void);
+
+	bf_status_t initFollowupPkt(void);
+
+	bf_status_t replyDigestCallback(const bf_rt_target_t &bf_rt_tgt,
+									const std::shared_ptr<bfrt::BfRtSession> bfrtsession,
+									std::vector<std::unique_ptr<bfrt::BfRtLearnData>> vec,
+									bf_rt_learn_msg_hdl *const learn_msg_hdl,
+									const void *cookie);
+
+	bf_status_t replyFollowupDigestCallback(const bf_rt_target_t &bf_rt_tgt,
+											const std::shared_ptr<bfrt::BfRtSession> bfrtsession,
+											std::vector<std::unique_ptr<bfrt::BfRtLearnData>> vec,
+											bf_rt_learn_msg_hdl *const learn_msg_hdl,
+											const void *cookie);
+
+	bf_status_t writeCalcRefTs(uint32_t calc_time_hi_dptp,
+							   uint32_t calc_time_lo_dptp,
+							   uint32_t now_elapsed_hi,
+							   uint32_t now_elapsed_lo,
+							   uint8_t switch_id);
+
+							   
+	bf_status_t sendFollowupPacket(uint8_t *dstAddr, uint32_t tx_capture_tstamp_lo);
+
+
+  bf_status_t dptp::setUpBfrt(bf_rt_target_t target, const char *progname) {
     dev_tgt = target;
     // Get devMgr singleton instance
     auto &devMgr = bfrt::BfRtDevMgr::getInstance();
     // Get bfrtInfo object from dev_id and p4 program name
-    auto bf_status = devMgr.bfRtInfoGet(dev_tgt.dev_id, "dptp", &bfrtInfo);
+    auto bf_status = devMgr.bfRtInfoGet(dev_tgt.dev_id, progname, &bfrtInfo);
     // Create a session object
     session = bfrt::BfRtSession::sessionCreate();
     printf("DPTP bfrt Setup!\n");
@@ -163,7 +204,7 @@ using namespace dptp;
     return BF_SUCCESS;
   }
 
-  bf_status_t dptp::writeReferenceTs (const uint64_t ts_hi, const uint64_t ts_lo, uint64_t switch_id) {
+  bf_status_t writeReferenceTs (const uint64_t ts_hi, const uint64_t ts_lo, uint64_t switch_id) {
     bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, switch_id);
     if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = reg_ts_hi_data->setValue(reg_ts_hi_f1, ts_hi);
@@ -230,7 +271,7 @@ using namespace dptp;
  * 
  * This increment Era is an interim update of the reference ts 
  */
-  bf_status_t dptp::incrementEra () {
+  bf_status_t incrementEra () {
     printf("Incrementing Era\n");
     uint32_t ts_hi, ts_lo;
     readReferenceTs(&ts_hi, &ts_lo, 0);
@@ -240,7 +281,7 @@ using namespace dptp;
   }
 
   /* Monitor global_ts, and check for wrap over for era maintenance */
-  void* dptp::eraMaintenance (void *args)  {
+  void* eraMaintenance (void *args)  {
     // Logic: Take two samples of data-plane timestamp, if latter < former, then wrap over detected
     bf_status_t status;
     uint64_t global_ts_ns_old;
@@ -270,7 +311,7 @@ using namespace dptp;
     return BF_SUCCESS;
   }
 
-  bf_status_t dptp::initReferenceTsAPI () {
+  bf_status_t initReferenceTsAPI () {
     bf_status = reg_ts_hi->keyAllocate(&reg_ts_hi_key);
     bf_status = reg_ts_hi->dataAllocate(&reg_ts_hi_data);
     bf_status = reg_ts_lo->keyAllocate(&reg_ts_lo_key);
@@ -279,7 +320,7 @@ using namespace dptp;
     return BF_SUCCESS;
   }
 
-  bf_status_t dptp::readReferenceTs(uint32_t *ts_hi, uint32_t *ts_lo, uint8_t switch_id) {
+  bf_status_t readReferenceTs(uint32_t *ts_hi, uint32_t *ts_lo, uint8_t switch_id) {
     std::vector<uint64_t> ts_lo_val;
 
     bf_status = reg_ts_hi_key->setValue(reg_ts_hi_index, (uint64_t)switch_id);
@@ -303,7 +344,7 @@ using namespace dptp;
     return BF_SUCCESS;
   }
 
-  void* dptp::sendDptpRequests (void *args) {
+  void* sendDptpRequests (void *args) {
     int i=0;
     
     while (1) {
@@ -326,7 +367,7 @@ using namespace dptp;
     pthread_join(era_thread, NULL);
   }
 
-  bf_status_t dptp::initRequestPkt(void) {
+  bf_status_t initRequestPkt(void) {
     int i=0;
     int cookie;
     if (bf_pkt_alloc(0, &bfDptpPkt, dptp_sz, BF_DMA_CPU_PKT_TRANSMIT_1) != 0) {
@@ -353,7 +394,7 @@ using namespace dptp;
     // printf("\n");
   }
 
-  bf_status_t dptp::initFollowupPkt(void) {
+  bf_status_t initFollowupPkt(void) {
     int i=0;
     int cookie;
     if (bf_pkt_alloc(0, &bfpkt, sz, BF_DMA_CPU_PKT_TRANSMIT_0) != 0) {
@@ -406,7 +447,7 @@ using namespace dptp;
     initFollowupPkt();
   }
 
-  bf_status_t dptp::sendFollowupPacket(uint8_t *dstAddr, uint32_t tx_capture_tstamp_lo) {
+  bf_status_t sendFollowupPacket(uint8_t *dstAddr, uint32_t tx_capture_tstamp_lo) {
     memcpy(dptp_followup_pkt.dstAddr, dstAddr, 6);//{0x3c, 0xfd,0xfe, 0xb7, 0xe7, 0xf4}
     dptp_followup_pkt.reference_ts_hi = htonl(tx_capture_tstamp_lo);
     memcpy(upkt, &dptp_followup_pkt, sz);
@@ -460,7 +501,7 @@ using namespace dptp;
     return bf_status;
   }
 
-  bf_status_t dptp::replyDigestCallback(const bf_rt_target_t &bf_rt_tgt,
+  bf_status_t replyDigestCallback(const bf_rt_target_t &bf_rt_tgt,
                             const std::shared_ptr<bfrt::BfRtSession> bfrtsession,
                             std::vector<std::unique_ptr<bfrt::BfRtLearnData>> vec,
                             bf_rt_learn_msg_hdl *const learn_msg_hdl,
@@ -532,7 +573,7 @@ using namespace dptp;
   }
 
 
-  bf_status_t dptp::writeCalcRefTs (uint32_t calc_time_hi_dptp, 
+  bf_status_t writeCalcRefTs (uint32_t calc_time_hi_dptp, 
                        uint32_t calc_time_lo_dptp, 
                        uint32_t now_elapsed_hi, 
                        uint32_t now_elapsed_lo,
@@ -549,7 +590,7 @@ using namespace dptp;
     writeReferenceTs(ref_calc_time_hi, ref_calc_time_lo, (uint64_t)switch_id);           
   }
 
-  bf_status_t dptp::reportDptpError (uint32_t calc_time_hi, 
+  bf_status_t reportDptpError (uint32_t calc_time_hi, 
                         uint32_t calc_time_lo,                       
                         uint32_t now_elapsed_hi, 
                         uint32_t now_elapsed_lo, 
@@ -585,7 +626,7 @@ using namespace dptp;
     printf("-------------------------------------------------\n");
   }
 
-  bf_status_t dptp::replyFollowupDigestCallback(const bf_rt_target_t &bf_rt_tgt,
+  bf_status_t replyFollowupDigestCallback(const bf_rt_target_t &bf_rt_tgt,
                             const std::shared_ptr<bfrt::BfRtSession> bfrtsession,
                             std::vector<std::unique_ptr<bfrt::BfRtLearnData>> vec,
                             bf_rt_learn_msg_hdl *const learn_msg_hdl,
@@ -658,13 +699,13 @@ using namespace dptp;
   }
 
   bf_status_t dptp::registerDigest (void) {
-    bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpIngressDeparser.dptp_followup_digest", &bfrtLearnFollowup);
+    bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpSwitchIngressDeparser.dptp_ingress_deparser.dptp_followup_digest", &bfrtLearnFollowup);
     if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = bfrtLearnFollowup->learnFieldIdGet("egress_port", &learn_egress_port);
     bf_status = bfrtLearnFollowup->learnFieldIdGet("mac_addr", &learn_mac_addr);
     bf_status = bfrtLearnFollowup->bfRtLearnCallbackRegister(session, dev_tgt, followupDigestCallback, nullptr);
 
-    bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpIngressDeparser.dptp_reply_digest", &bfrtLearnReply);
+    bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpSwitchIngressDeparser.dptp_ingress_deparser.dptp_reply_digest", &bfrtLearnReply);
     if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = bfrtLearnReply->learnFieldIdGet("switch_id", &learn_rswitch_id);
     bf_status = bfrtLearnReply->learnFieldIdGet("reference_ts_hi", &learn_reference_ts_hi);
@@ -677,7 +718,7 @@ using namespace dptp;
     bf_status = bfrtLearnReply->learnFieldIdGet("now_igts_lo", &learn_now_igts_lo);
     bf_status = bfrtLearnReply->bfRtLearnCallbackRegister(session, dev_tgt, replyDigestCallback, nullptr);
 
-    bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpIngressDeparser.dptp_reply_followup_digest", &bfrtLearnReplyFop);
+    bf_status = bfrtInfo->bfrtLearnFromNameGet("DptpSwitchIngressDeparser.dptp_ingress_deparser.dptp_reply_followup_digest", &bfrtLearnReplyFop);
     if (bf_status != BF_SUCCESS) return bf_status;
     bf_status = bfrtLearnReplyFop->learnFieldIdGet("switch_id", &learn_rfswitch_id);
     bf_status = bfrtLearnReplyFop->learnFieldIdGet("tx_capturets_lo", &learn_tx_capturets_lo);
