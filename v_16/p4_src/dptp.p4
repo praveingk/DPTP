@@ -45,7 +45,7 @@ Register<bit<32>, bit<32>>(1) dptp_now_lo;
 
 Register<bit<16>, bit<16>>(MAX_SWITCHES) timesyncs2s_igts_hi;
 
-control DptpNow (inout header_t hdr, inout dptp_metadata_t dptp_meta, in ingress_intrinsic_metadata_from_parser_t ig_intr_md_from_parser_aux) {
+control DptpNow (inout dptp_metadata_t dptp_meta, in ingress_intrinsic_metadata_from_parser_t ig_intr_md_from_parser_aux) {
     RegisterAction<bit<32>, bit<8>, bit<32>>(ts_hi) ts_hi_get = {
         void apply (inout bit<32> value, out bit<32> result) {  
             result = value;
@@ -139,29 +139,29 @@ Register<bit<32>, bit<32>>(MAX_SWITCHES) dptp_respnow_hi;
 
 Register<bit<32>, bit<32>>(MAX_SWITCHES) dptp_respnow_lo;
 
-control DptpRespStore (inout header_t hdr, inout dptp_metadata_t dptp_meta) {
+control DptpRespStore (inout dptp_t dptp_hdr, inout dptp_metadata_t dptp_meta) {
     
     RegisterAction<bit<32>, bit<8>, bit<32>>(dptp_reqmacdelay) dptp_reqmacdelay_set = {
         void apply(inout bit<32> value) {
-            value = (bit<32>)hdr.dptp.igmacts;
+            value = (bit<32>)dptp_hdr.igmacts;
         }
     };
 
     RegisterAction<bit<32>, bit<8>, bit<32>>(dptp_respigts) dptp_respigts_set = {
         void apply(inout bit<32> value, out bit<32> result) {
-            value = (bit<32>)hdr.dptp.igts;
+            value = (bit<32>)dptp_hdr.igts;
         }
     };    
 
     RegisterAction<bit<32>, bit<8>, bit<32>>(dptp_respnow_hi) dptp_respnow_hi_set = {
         void apply(inout bit<32> value) {
-            value = hdr.dptp.reference_ts_hi;
+            value = dptp_hdr.reference_ts_hi;
         }
     };
 
     RegisterAction<bit<32>, bit<8>, bit<32>>(dptp_respnow_lo) dptp_respnow_lo_set = {
         void apply(inout bit<32> value) {
-            value = hdr.dptp.reference_ts_lo;
+            value = dptp_hdr.reference_ts_lo;
         }
     };
     
@@ -196,7 +196,7 @@ control DptpRespStore (inout header_t hdr, inout dptp_metadata_t dptp_meta) {
     }
 }
 
-control DptpCorrect (inout header_t hdr, inout metadata_t meta) {
+control DptpCorrect (inout dptp_t dptp_hdr, inout dptp_metadata_t dptp_meta) {
 
     apply {
         /*
@@ -236,13 +236,15 @@ control DptpCorrect (inout header_t hdr, inout metadata_t meta) {
 #endif
 
 control DptpIngress(
-    inout header_t hdr, 
+    inout dptp_t dptp_hdr, 
+    inout bit<48> ethernet_srcAddr,
+    inout bit<48> ethernet_dstAddr,
     inout dptp_metadata_t dptp_meta, 
     inout dptp_bridge_t bridge, 
     in ingress_intrinsic_metadata_t ig_intr_md, 
     in ingress_intrinsic_metadata_from_parser_t ig_intr_md_from_parser_aux, 
-    inout ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr, 
-    inout ingress_intrinsic_metadata_for_tm_t ig_intr_md_for_tm) {
+    out ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr, 
+    out ingress_intrinsic_metadata_for_tm_t ig_intr_md_for_tm) {
 
     RegisterAction<bit<32>, bit<1>, bit<32>>(dptp_now_hi) dptp_now_hi_set = {
         void apply(inout bit<32> value) {
@@ -263,10 +265,10 @@ control DptpIngress(
     action nop() {}
     
     action fill_dptp_packet() {
-        hdr.dptp.reference_ts_lo = dptp_meta.dptp_now_lo;
-        hdr.dptp.reference_ts_hi = dptp_meta.dptp_now_hi;
-        hdr.dptp.igmacts = ig_intr_md.ingress_mac_tstamp;
-        hdr.dptp.igts = ig_intr_md_from_parser_aux.global_tstamp;
+        dptp_hdr.reference_ts_lo = dptp_meta.dptp_now_lo;
+        dptp_hdr.reference_ts_hi = dptp_meta.dptp_now_hi;
+        dptp_hdr.igmacts = ig_intr_md.ingress_mac_tstamp;
+        dptp_hdr.igts = ig_intr_md_from_parser_aux.global_tstamp;
     }
     
     action do_dptp_store_now_hi() {
@@ -278,15 +280,10 @@ control DptpIngress(
     }
     
     action reverse_packet() {
-        hdr.ethernet.dstAddr = hdr.ethernet.srcAddr;
-        hdr.ethernet.srcAddr = 48w0x11;
+        ethernet_dstAddr = ethernet_srcAddr;
+        ethernet_srcAddr = 48w0x11;
     }
 
-    action set_egr(PortId_t egress_spec) {
-        ig_intr_md_for_tm.ucast_egress_port = (bit<9>)egress_spec;
-        dptp_meta.egress_port = egress_spec;
-    }
-    
     action do_qos() {
         ig_intr_md_for_tm.qid = 5w3;
     }
@@ -316,21 +313,8 @@ control DptpIngress(
         default_action = _drop();
     }
 
-    table mac_forward {
-        actions = {
-            set_egr();
-            nop();
-        }
-        key = {
-            hdr.ethernet.dstAddr: exact;
-        }
-        size = 20;
-        default_action = nop();
-    }
-
-
     apply {
-        if (hdr.dptp.command == COMMAND_DPTPS2S_RESPONSE) {
+        if (dptp_hdr.command == COMMAND_DPTPS2S_RESPONSE) {
 #ifdef DPTP_CALC_DP
             // DPTP Reference Adjustment in the data-plane.
             DptpRespStore.apply();
@@ -341,7 +325,7 @@ control DptpIngress(
             _drop();
 #endif
             // Send Digest to Control-plane along with reply details
-        } else if (hdr.dptp.command == COMMAND_DPTP_FOLLOWUP) {
+        } else if (dptp_hdr.command == COMMAND_DPTP_FOLLOWUP) {
             if (ig_intr_md.ingress_port != SWITCH_CPU) {
 #ifdef DPTP_CALC_DP
                 //DPTP Reference Adjustment in the data-plane.
@@ -354,13 +338,12 @@ control DptpIngress(
             }
         }
 
-        if (hdr.dptp.command == COMMAND_DPTP_REQUEST || hdr.dptp.command == COMMAND_DPTPS2S_REQUEST) {
+        if (dptp_hdr.command == COMMAND_DPTP_REQUEST || dptp_hdr.command == COMMAND_DPTPS2S_REQUEST) {
             reverse_packet();
             fill_dptp_packet();
             ig_intr_md_for_dprsr.digest_type = DPTP_FOLLOWUP_DIGEST_TYPE;
         }
 #ifdef LOGICAL_SWITCHES        
-        mac_forward.apply();
         bridge.switch_id = dptp_meta.switch_id;
 #endif // LOGICAL_SWITCHES
         bridge.setValid();
@@ -376,7 +359,7 @@ Register<bit<32>, bit<32>>(MAX_LINKS) current_utilization;
 Register<bit<32>, bit<32>>(MAX_SWITCHES) timesyncs2s_reqts_lo;
 
 control DptpEgress(
-    inout header_t hdr, 
+    inout dptp_t dptp_hdr, 
     inout dptp_metadata_t dptp_meta, 
     inout dptp_bridge_t bridge,
     in egress_intrinsic_metadata_t eg_intr_md, 
@@ -419,36 +402,31 @@ control DptpEgress(
 #endif // LOGICAL_SWITCHES
 
     action do_dptp_capture_tx () {
-        // hdr.transparent_clock.setValid();
-        // hdr.transparent_clock.udp_chksum_offset = 0;
-        // hdr.transparent_clock.elapsed_time_offset = 51;
-        // hdr.transparent_clock.captureTs = 0;
-        //eg_intr_md_for_oport.update_delay_on_tx = 1;
         eg_intr_md_for_oport.capture_tstamp_on_tx = 1;
     }
     action do_dptp_response () {
-        hdr.dptp.command = COMMAND_DPTP_RESPONSE;
-        hdr.dptp.egts = eg_intr_md_from_parser_aux.global_tstamp;
-        hdr.dptp.current_rate = dptp_meta.current_utilization;
+        dptp_hdr.command = COMMAND_DPTP_RESPONSE;
+        dptp_hdr.egts = eg_intr_md_from_parser_aux.global_tstamp;
+        dptp_hdr.current_rate = dptp_meta.current_utilization;
     }
     action do_dptps2s_request () {
-        hdr.dptp.command = COMMAND_DPTPS2S_REQUEST;
+        dptp_hdr.command = COMMAND_DPTPS2S_REQUEST;
     }
     action do_dptps2s_response () {
-        hdr.dptp.command = COMMAND_DPTPS2S_RESPONSE;
-        hdr.dptp.egts = eg_intr_md_from_parser_aux.global_tstamp;
+        dptp_hdr.command = COMMAND_DPTPS2S_RESPONSE;
+        dptp_hdr.egts = eg_intr_md_from_parser_aux.global_tstamp;
     }
 
     apply {
         do_calc_host_rate();
-        if (hdr.dptp.command != COMMAND_DPTP_FOLLOWUP) {
+        if (dptp_hdr.command != COMMAND_DPTP_FOLLOWUP) {
             do_dptp_capture_tx();
         }
-        if (hdr.dptp.command == COMMAND_DPTPS2S_REQUEST) {
+        if (dptp_hdr.command == COMMAND_DPTPS2S_REQUEST) {
             do_dptps2s_response();
-        } else if (hdr.dptp.command == COMMAND_DPTP_REQUEST) {
+        } else if (dptp_hdr.command == COMMAND_DPTP_REQUEST) {
             do_dptp_response();
-        } else if (hdr.dptp.command == COMMAND_DPTPS2S_GENREQUEST) {
+        } else if (dptp_hdr.command == COMMAND_DPTPS2S_GENREQUEST) {
             do_dptps2s_request();
         }       
     }

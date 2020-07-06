@@ -10,6 +10,40 @@
 #include "dptp_headers.p4"
 
 
+header ethernet_t {
+    bit<48> dstAddr;
+    bit<48> srcAddr;
+    bit<16> etherType;
+}
+
+header ipv4_t {
+    bit<4>  version;
+    bit<4>  ihl;
+    bit<8>  diffserv;
+    bit<16> totalLen;
+    bit<16> identification;
+    bit<3>  flags;
+    bit<13> fragOffset;
+    bit<8>  ttl;
+    bit<8>  protocol;
+    bit<16> hdrChecksum;
+    bit<32> srcAddr;
+    bit<32> dstAddr;
+}
+
+
+struct header_t {
+    ethernet_t      ethernet;
+    ipv4_t          ipv4;
+    dptp_t          dptp;
+}
+
+struct metadata_t {
+    dptp_metadata_t    mdata;
+    dptp_bridge_t      bridged_header;
+}
+
+
 parser DptpSwitchIngressParser (
     packet_in pkt, 
     out header_t hdr, 
@@ -238,9 +272,11 @@ control DptpSwitchIngress(
 #ifdef LOGICAL_SWITCHES    
         virt_switch.apply(hdr, meta, ig_intr_md, ig_intr_md_for_dprsr);
 #endif // LOGICAL SWITCHES        
-        dptp_now.apply(hdr, meta.mdata, ig_intr_md_from_parser_aux);
+        dptp_now.apply(meta.mdata, ig_intr_md_from_parser_aux);
         // Current Global time is now available here.
-        dptp_ingress.apply(hdr, meta.mdata,meta.bridged_header, ig_intr_md, ig_intr_md_from_parser_aux, ig_intr_md_for_dprsr, ig_intr_md_for_tm);
+        dptp_ingress.apply(hdr.dptp, hdr.ethernet.srcAddr, hdr.ethernet.dstAddr, 
+            meta.mdata,meta.bridged_header, ig_intr_md, ig_intr_md_from_parser_aux, ig_intr_md_for_dprsr, ig_intr_md_for_tm);
+        mac_forward.apply();
     }
 }
 
@@ -255,7 +291,8 @@ control DptpSwitchEgress(
     DptpEgress() dptp_egress;
 
     apply {
-        dptp_egress.apply(hdr, meta.mdata, meta.bridged_header, eg_intr_md, eg_intr_md_from_parser_aux, eg_intr_md_for_dprsr, eg_intr_md_for_oport);
+        dptp_egress.apply(hdr.dptp, meta.mdata, meta.bridged_header, 
+            eg_intr_md, eg_intr_md_from_parser_aux, eg_intr_md_for_dprsr, eg_intr_md_for_oport);
     }
 }
 
