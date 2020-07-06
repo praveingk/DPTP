@@ -8,7 +8,7 @@ def setup_tofino1 ():
 
 
 def setup_virt_tofino2 ():
-    virtSwitch = bfrt.dptp.pipe.DptpSwitchIngress.virt_switch
+    virtSwitch = bfrt.dptp_switch.pipe.DptpSwitchIngress.virt_switch
 
     virtSwitch.acl.add_with__drop(ingress_port=176, dstaddr=0xa0000010000a, ethertype=0x800)
     virtSwitch.acl.add_with__drop(ingress_port=160, dstaddr=0x100000000001, ethertype=0x800)
@@ -22,7 +22,7 @@ def setup_virt_tofino2 ():
     pass
 
 def setup_tofino2 ():
-    dptpSwitchIngress = bfrt.dptp.pipe.DptpSwitchIngress
+    dptpSwitchIngress = bfrt.dptp_switch.pipe.DptpSwitchIngress
 
     dptpSwitchIngress.dptp_now.dptp_handle_overflow.add_with_nop(dptp_compare_residue=0)
 
