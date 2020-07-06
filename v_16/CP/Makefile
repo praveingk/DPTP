@@ -6,12 +6,17 @@ PROGNAME := dptp_main
 ARCH := tofino
 CXXFLAGS = 
 PROFILE := test
+
 ifeq ($(profile), debug)
 	CXXFLAGS += -DDEBUG
 endif
+
 SOURCES := src/dptp.cpp src/dptp_main.cpp
-TOFINO_BUILD_DIR = /root/bf-sde-9.1.1/install
+
+TOFINO_BUILD_DIR = $(SDE_INSTALL)
+
 TOFINO_SDE_INCLUDE := -I$(TOFINO_BUILD_DIR)/include
+
 TOFINO_LIBS := /usr/lib/x86_64-linux-gnu/libpthread.so \
 /usr/lib/x86_64-linux-gnu/libpcap.so\
 /usr/lib/libpiall.so\
