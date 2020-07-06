@@ -26,11 +26,11 @@ def setup_tofino2 ():
 
     dptpSwitchIngress.dptp_now.dptp_handle_overflow.add_with_nop(dptp_compare_residue=0)
 
-    dptpSwitchIngress.dptp_ingress.mac_forward.add_with_set_egr(dstaddr=0x3cfdfead84a4, egress_spec=130)
-    dptpSwitchIngress.dptp_ingress.mac_forward.add_with_set_egr(dstaddr=0x3cfdfead84a5, egress_spec=131)
-    dptpSwitchIngress.dptp_ingress.mac_forward.add_with_set_egr(dstaddr=0x6cb3115309b2, egress_spec=147)
-    dptpSwitchIngress.dptp_ingress.mac_forward.add_with_set_egr(dstaddr=0xa0000010000a, egress_spec=160)
-    dptpSwitchIngress.dptp_ingress.mac_forward.add_with_set_egr(dstaddr=0x100000000001, egress_spec=176)
+    dptpSwitchIngress.mac_forward.add_with_set_egr(dstaddr=0x3cfdfead84a4, egress_spec=130)
+    dptpSwitchIngress.mac_forward.add_with_set_egr(dstaddr=0x3cfdfead84a5, egress_spec=131)
+    dptpSwitchIngress.mac_forward.add_with_set_egr(dstaddr=0x6cb3115309b2, egress_spec=147)
+    dptpSwitchIngress.mac_forward.add_with_set_egr(dstaddr=0xa0000010000a, egress_spec=160)
+    dptpSwitchIngress.mac_forward.add_with_set_egr(dstaddr=0x100000000001, egress_spec=176)
 
     pass
 
