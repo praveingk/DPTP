@@ -34,6 +34,74 @@
 #endif
 
 
+control virtSwitch(inout dptp_t dptp_hdr, 
+    inout dptp_metadata_t dptp_meta,
+    in bit<48> ethernet_srcAddr,
+    in bit<48> ethernet_dstAddr,
+    in bit<16> ethernet_etherType,     
+    in PortId_t ingress_port, 
+    inout ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr) {
+
+    action _drop() {
+        ig_intr_md_for_dprsr.drop_ctl = 1;
+    }
+
+    action nop() {}
+
+    action classify_switch (bit<8> switch_id) {
+        dptp_meta.switch_id = switch_id;
+    }
+    
+    action classify_src_switch (bit<8> switch_id) {
+        dptp_meta.src_switch_id = switch_id;
+    }
+
+    table acl {
+        actions = {
+            _drop();
+            nop();
+
+        }
+        key = {
+            ingress_port: exact;
+            ethernet_dstAddr   : exact;
+            ethernet_etherType : exact;
+        }
+        default_action = nop();
+    }
+    
+    table classify_logical_switch {
+        actions = {
+            classify_switch();
+            nop();
+        }
+        key = {
+            ethernet_dstAddr: exact;
+        }
+        default_action = nop();
+    }
+    
+    table classify_src_logical_switch {
+        actions = {
+            classify_src_switch();
+            nop();
+        }
+        key = {
+            ethernet_srcAddr: exact;
+        }
+        default_action = nop();
+    }
+    
+    apply {
+        acl.apply();
+        if (dptp_hdr.isValid()) {
+            classify_logical_switch.apply();
+            classify_src_logical_switch.apply();
+        }
+    }
+
+}
+
 
 Register<bit<32>, bit<32>>(MAX_SWITCHES) ts_hi;
 
