@@ -75,20 +75,6 @@ parser SwitchIngressParser (
     }    
 }
 
-// control DptpSwitchIngressDeparser (
-//     packet_out pkt, 
-//     inout header_t hdr, 
-//     in metadata_t meta, 
-//     in ingress_intrinsic_metadata_for_deparser_t ig_intr_md_for_dprsr) {
-
-//     DptpIngressDeparser() dptp_ingress_deparser;
-
-//     apply {
-//         dptp_ingress_deparser.apply(pkt, hdr, meta, ig_intr_md_for_dprsr);
-//         pkt.emit(hdr.ethernet);
-//     }
-// }
-
 control SwitchIngressDeparser (
     packet_out pkt, 
     inout header_t hdr, 
