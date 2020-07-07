@@ -2,7 +2,7 @@
 
 ## Code Organization
 
-1) dptp_switch.p4 :
+1) dptp_simple_switch.p4 :
     Dptp_switch is a simple mac-based forwarding switch which supports DPTP. 
     This reference switch code provides insights on how to integrate DPTP into any p4 code.
 
