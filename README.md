@@ -32,8 +32,8 @@ A single tofino switch named "tofino1" is virtualized into two switches Master(M
 ```
 4) Load the p4 program, and run the control plane API code using :
 ```shell
-     "cd $DPTP_PATH/v_14/CP"
-     "./run.sh"
+     cd $DPTP_PATH/v_14/CP
+     ./run.sh
 ```
 5) This should automatically start the synchronization between Switch1 and master through packets from control-plane.
 
@@ -63,9 +63,15 @@ A single tofino switch named "tofino1" is virtualized into two switches Master(M
      
 4) Load the p4 program, and run the control plane API code using :
 ```shell
-     "cd $DPTP_PATH/v_16/CP"
-     "./run.sh"
+     cd $DPTP_PATH/v_16/CP
+     ./run.sh
 ```
+   If you want to enable debugs the command is :
+
+```shell
+     ./run.sh debug
+```
+
 5) This should automatically start the synchronization between Switch1 and master through packets from control-plane.
 
 
