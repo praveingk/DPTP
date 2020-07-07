@@ -100,34 +100,42 @@ void init_ports() {
 
 
 int main(int argc, char **argv) {
-	const char *progname = "dptp_switch";
+	const char * p4progname = "dptp_simple_switch";
+	const char * followup_digest = "SwitchIngressDeparser.dptp_ingress_deparser.dptp_followup_digest";
+	const char * reply_digest = "SwitchIngressDeparser.dptp_ingress_deparser.dptp_reply_digest";
+	const char * reply_followup_digest = "SwitchIngressDeparser.dptp_ingress_deparser.dptp_reply_followup_digest";
+	uint32_t dptp_interval = 1000000; // Currently supports upto a request every 2ms, i.e. 500 DPTP requests/sec
 	bf_rt_target_t dev_tgt;
+
+	// Initialize the device id and pipelines to be used for DPTP
+    dev_tgt.dev_id = 0;
+    dev_tgt.pipe_id = ALL_PIPES;
+
 	// Start the BF Switchd
-	init_bf_switchd(progname);
+	init_bf_switchd(p4progname);
+
 	// Initialize the switch ports and data-plane MATs
 	getSwitchName();
 	init_ports();
 	init_tables();
 
-	printf("Starting dptp_topo Control Plane Unit ..\n");
+	printf("Starting DPTP Simple Switch..\n");
 
-	// Initialize the device id and pipelines to be used for DPTP
-    dev_tgt.dev_id = 0;
-    dev_tgt.pipe_id = ALL_PIPES;
 	// Setup bfrt runtime APIs and then the register APIs which will be used to read/write registers (reference)
-	dptp::setUpBfrt(dev_tgt, progname);
+	dptp::setUpBfrt(dev_tgt, p4progname);
 	dptp::initRegisterAPI();
 
 	// Initialize packets (request,followup) and register digest for followup generation, reply and reply followup packets.
 	dptp::initPackets();
-	dptp::registerDigest();
+	dptp::registerDigest(followup_digest, reply_digest, reply_followup_digest);
 
 	// Master Switch which has the Clock Reference
 	dptp::initReferenceTs();
 	dptp::createEraThread();
 
 	// Other Switches which needs the Clock Reference
-	dptp::createDptpRequestThread();
+	sleep(2); // 
+	dptp::createDptpRequestThread(dptp_interval);
 
 	// Wait on the threads so that DPTP runs in the background
 	dptp::waitOnThreads();

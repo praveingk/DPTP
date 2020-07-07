@@ -2,16 +2,16 @@
 # PROGNAME : Things to be changed according to program.
 # PROFILE  : test | prod |
 #
-PROGNAME := dptp_main
+PROGNAME := dptp_simple_switch
 ARCH := tofino
 CXXFLAGS = 
 PROFILE := test
-
+DEBUGLEVEL = 1
 ifeq ($(profile), debug)
-	CXXFLAGS += -DDEBUG
+	CXXFLAGS += -DDEBUGLEVEL=$(DEBUGLEVEL)
 endif
 
-SOURCES := src/dptp.cpp src/dptp_main.cpp
+SOURCES := src/dptp.cpp src/dptp_simple_switch.cpp
 
 TOFINO_BUILD_DIR = $(SDE_INSTALL)
 

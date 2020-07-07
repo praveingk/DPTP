@@ -62,9 +62,9 @@ namespace dptp {
 
 	void waitOnThreads(void);
 
-	bf_status_t registerDigest(void);
+	bf_status_t registerDigest(const char *dptp_followup_digest, const char *dptp_reply_digest, const char *dptp_reply_followup_digest);
 
-	void createDptpRequestThread(void);
+	void createDptpRequestThread(uint32_t interval);
 } // namespace dptp
 
 #endif // _DPTP_HPP

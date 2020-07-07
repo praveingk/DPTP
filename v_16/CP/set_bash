@@ -1,1 +1,1 @@
-export LD_LIBRARY_PATH=/usr/local/lib/:/root/bf-sde-9.1.1/install/lib/
+export LD_LIBRARY_PATH=/usr/local/lib/:$SDE_INSTALL/lib/

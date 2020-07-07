@@ -12,4 +12,4 @@ setbash="set_bash"
 
 
 source $setbash;
-make -f $makefile clean ; make -f $makefile profile=$profile; ./dptp_main
+make -f $makefile clean ; make -f $makefile profile=$profile; ./dptp_simple_switch
