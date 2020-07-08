@@ -1,10 +1,10 @@
 # DPTP
 Data-Plane Time synchronization Protocol
 
-(https://www.comp.nus.edu.sg/~pravein/papers/DPTP_SOSR19.pdf)
+Paper Link :point_right:	 https://www.comp.nus.edu.sg/~pravein/papers/DPTP_SOSR19.pdf
 
 This source code synchronizes two Barefoot Tofino switches to support the global timing (64-bit) in the data-plane. 
-Once DPTP is running, packets can have a global timing context, which is useful for several applications like latency tracking, monitoring, updates, etc
+Once DPTP is running, packets can have a global timing context, which is useful for several applications like latency tracking, monitoring, updates, ordering of events, etc.
 
 p4_14 : [v_14/](https://github.com/praveingk/DPTP/tree/master/v_14) (Tested on SDE 8.x.x)
 
