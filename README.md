@@ -84,12 +84,12 @@ Pull from https://github.com/praveingk/moongen/, Make sure the submodule libmoon
 Follow the readme instructions in moongen to build it.
 1) Enable the NIC to work with DPDK:
 ```shell
-sudo ./libmoon/deps/dpdk/usertools/dpdk-devbind.py --b igb_uio <NIC Port>
+sudo ./libmoon/deps/dpdk/usertools/dpdk-devbind.py --b igb_uio <NIC Ports>
 ```
 
 2) To start DPTP in the network between switch 1 and master:
 ```shell
- sudo ./build/MoonGen examples/dptp_topo.lua <DPDK PORT id1> <DPDK Port id2>
+ sudo ./build/MoonGen examples/dptp_host.lua <DPDK PORT id1> <DPDK Port id2>
 ```
 Note that "DPDK Port id2" is redundant and is used only for switch-to-host DPTP accuracy measurement. 
 
@@ -98,7 +98,7 @@ Note that "DPDK Port id2" is redundant and is used only for switch-to-host DPTP 
 1) To create cross-traffic in the link being used for synchronization towards the SW1 (i.e. 160 --> 176),
 we simply craft a packet to destination address of SW1 (0x100000000001) and send it from any host link.
 ```shell
- sudo ./build/MoonGen examples/dptp_topo.lua -d 1 <DPDK PORT id1> <DPDK Port id2>
+ sudo ./build/MoonGen examples/dptp_host.lua -d 1 <DPDK PORT id1> <DPDK Port id2>
 ```
 Note that "DPDK Port id2" is redundant and is used only for switch-to-host DPTP accuracy measurement. 
 
