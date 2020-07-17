@@ -10,6 +10,7 @@ p4_14 : [v_14/](https://github.com/praveingk/DPTP/tree/master/v_14) (Tested on S
 
 p4_16 : [v_16/](https://github.com/praveingk/DPTP/tree/master/v_16) (Tested on SDE 9.x.x)
 
+Additionally, once Switches are synchronized, end-hosts could run dpdk-based [dptpclient](https://github.com/praveingk/DPTP/tree/master/dptpclient) to synchronize end-hosts/nic with the network time.
 
 # Topology 
 The Topology used in as below : 
