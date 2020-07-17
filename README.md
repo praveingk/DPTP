@@ -79,7 +79,7 @@ A single tofino switch named "tofino1" is virtualized into two switches Master(M
 5) This should automatically start the synchronization between Switch1 and master through packets from control-plane.
 
 ### Steps to run DPTPClient for host synchronization:
-Refer [Readme]{https://github.com/praveingk/DPTP/tree/master/dptpclient}
+Refer [Readme](https://github.com/praveingk/DPTP/tree/master/dptpclient)
 
 ### Steps to run MoonGen for host synchronization:
 Moongen script sends synchronization requests packets between switches
