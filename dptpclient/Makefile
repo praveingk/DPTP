@@ -5,7 +5,7 @@
 APP = dptpclient
 
 # all source are stored in SRCS-y
-SRCS-y := dptpclient.c dptp.c
+SRCS-y := src/dptpclient.c src/dptp.c
 
 # Build using pkg-config variables if possible
 ifeq ($(shell pkg-config --exists libdpdk && echo 0),0)
