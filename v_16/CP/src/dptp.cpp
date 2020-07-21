@@ -319,8 +319,7 @@ void *eraMaintenance(void *args)
     status = bf_ts_global_baresync_ts_get((bf_dev_id_t)0, &global_ts_ns_old, &baresync_ts_ns);
     status = bf_ts_global_baresync_ts_get((bf_dev_id_t)0, &global_ts_ns_new, &baresync_ts_ns);
     //printf("%lu,%lu\n", global_ts_ns_old, global_ts_ns_new);
-    sleep(5);
-    if (true) //global_ts_ns_new < global_ts_ns_old)   
+    if (global_ts_ns_new < global_ts_ns_old)   
     {
       // Wrap Detected.
       // If there is a DPTP calculation in progress, just turn the updateEra flag to true
