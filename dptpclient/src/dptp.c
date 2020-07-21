@@ -59,15 +59,16 @@ ns_to_timeval(int64_t nsec)
 static inline void
 update_kernel_time(struct dptp_data_ts *dptp_data)
 {
-  int64_t nsec;
   struct timespec net_time, sys_time;
+  struct timeval kernel_adj;
+
   clock_gettime(CLOCK_REALTIME, &sys_time);
   rte_eth_timesync_read_time(dptp_data->portid, &net_time);
 
-  nsec = (int64_t)timespec64_to_ns(&net_time) -
+  dptp_data->kernel_delta = (int64_t)timespec64_to_ns(&net_time) -
          (int64_t)timespec64_to_ns(&sys_time);
 
-  dptp_data->kernel_adj = ns_to_timeval(nsec);
+  kernel_adj = ns_to_timeval(dptp_data->kernel_delta);
 
   /*
 	 * If difference between kernel time and system time in NIC is too big
@@ -76,10 +77,10 @@ update_kernel_time(struct dptp_data_ts *dptp_data)
 	 * longer to adjust the time).
 	 */
 
-  if (nsec > KERNEL_TIME_ADJUST_LIMIT || nsec < -KERNEL_TIME_ADJUST_LIMIT)
+  if (dptp_data->kernel_delta > KERNEL_TIME_ADJUST_LIMIT || dptp_data->kernel_delta < -KERNEL_TIME_ADJUST_LIMIT)
     clock_settime(CLOCK_REALTIME, &net_time);
   else
-    adjtime(&dptp_data->kernel_adj, 0);
+    adjtime(&kernel_adj, 0);
 }
 
 static void print_dptp_packet(struct dptp_header *dptp_hdr)
@@ -96,7 +97,11 @@ static void print_dptp_data(struct dptp_data_ts *dptp_data)
   int switchTxDelay = dptp_data->txTs - dptp_data->egTs;
   int nicWireDelay = dptp_data->latency - (dptp_data->txTs - dptp_data->igMacTs);
   int dptpRespDelay = nicWireDelay / 2;
-  printf("----------------------------\n");
+  int turnaroundtime = dptp_data->rxFopCallTs.tv_nsec - dptp_data->txReqCallTs.tv_nsec; 
+  int clockdrift = (dptp_data->rxRespTs.tv_nsec - dptp_data->txReqTs.tv_nsec);
+  printf("---------------------------------------\n");
+  printf("DPTP - port %d\n", dptp_data->portid);
+  printf("---------------------------------------\n");
   printf("DPTP RTT                = %d ns\n", dptp_data->latency);
   printf("|_ Switch Request Delay = %d ns\n", switchReqDelay);
   printf("|_ Switch Queuing Delay = %d ns\n", switchQueueDelay);
@@ -109,8 +114,9 @@ static void print_dptp_data(struct dptp_data_ts *dptp_data)
   printf("DPTP Now                = %lu ns\n", dptp_data->nowTs);
   printf("Correcting Nic Time     = %lu by delta =  %ld ns\n", dptp_data->nicTimeTs, dptp_data->dptpDelta);
   printf("|_ DPTP Client Delay    = %u ns\n", dptp_data->clientDelta);
-  printf("Correcting Kernel time  = %ld ns\n", dptp_data->kernel_adj.tv_usec);
-  printf("----------------------------\n");
+  printf("Correcting Kernel time  = %ld ns\n", dptp_data->kernel_delta);
+  printf("Total turnaround time   = %d ns\n", turnaroundtime);
+  printf("---------------------------------------\n");
 }
 
 static void dptp_correct_time(struct dptp_data_ts *dptp_data)
@@ -164,7 +170,7 @@ parse_dptp_resp(struct dptp_header *dptp_hdr, struct dptp_data_ts *dptp_data, ui
   dptp_data->portRate = htonl(dptp_hdr->portRate);
   dptp_data->igMacTs = dptpts_to_ns(dptp_hdr->igMacTs);
   dptp_data->igTs = dptpts_to_ns(dptp_hdr->igTs);
-  dptp_data->egTs = dptpts_to_ns(dptp_hdr->egTs);
+  dptp_data->egTs = dptpts_to_ns(dptp_hdr->egTs); 
   dptp_data->latency = timespec64_to_ns(&dptp_data->rxRespTs) - timespec64_to_ns(&dptp_data->txReqTs);
   nowHiTemp = (nowHiTemp | dptp_data->nowHi) << 32;
   //printf("%lu\n", nowHiTemp);
@@ -185,15 +191,15 @@ static void parse_dptp_fup(struct dptp_header *dptp_hdr, struct dptp_data_ts *dp
   dptp_correct_time(dptp_data);
 }
 
-static void send_dptp_request(struct dptp_data_ts *dptp_data, struct rte_ether_addr tor_switch, struct rte_mempool *mbuf_pool)
+static void init_dptp_request (struct dptp_data_ts *dptp_data, struct rte_ether_addr tor_switch, struct rte_mempool *mbuf_pool) 
 {
-  struct rte_mbuf *dptp_req_pkt;
   size_t pkt_size;
   struct rte_ether_hdr *eth_hdr;
   struct rte_ether_addr eth_addr;
   struct dptp_header *dptp_hdr;
   struct rte_ether_addr tor_switchaddr = tor_switch;
-  int wait_us, ret;
+
+  int ret;
 
   ret = rte_eth_macaddr_get(dptp_data->portid, &eth_addr);
   if (ret != 0)
@@ -203,34 +209,39 @@ static void send_dptp_request(struct dptp_data_ts *dptp_data, struct rte_ether_a
            rte_strerror(-ret));
     return;
   }
-  dptp_req_pkt = rte_pktmbuf_alloc(mbuf_pool);
-  if (dptp_req_pkt == NULL)
+  dptp_data->dptp_req_pkt = rte_pktmbuf_alloc(mbuf_pool);
+  if (dptp_data->dptp_req_pkt == NULL)
   {
     printf("Failed to allocate mbuf\n");
     return;
   }
   pkt_size = sizeof(struct rte_ether_hdr) + sizeof(struct dptp_header);
-  dptp_req_pkt->data_len = pkt_size;
-  dptp_req_pkt->pkt_len = pkt_size;
-  eth_hdr = rte_pktmbuf_mtod(dptp_req_pkt, struct rte_ether_hdr *);
+  dptp_data->dptp_req_pkt->data_len = pkt_size;
+  dptp_data->dptp_req_pkt->pkt_len = pkt_size;
+  eth_hdr = rte_pktmbuf_mtod(dptp_data->dptp_req_pkt, struct rte_ether_hdr *);
 
   rte_ether_addr_copy(&eth_addr, &eth_hdr->s_addr);
 
   rte_ether_addr_copy(&tor_switchaddr, &eth_hdr->d_addr);
 
   eth_hdr->ether_type = htons(PTP_PROTOCOL);
-  dptp_hdr = (struct dptp_header *)(rte_pktmbuf_mtod(dptp_req_pkt, char *) + sizeof(struct rte_ether_hdr));
+  dptp_hdr = (struct dptp_header *)(rte_pktmbuf_mtod(dptp_data->dptp_req_pkt, char *) + sizeof(struct rte_ether_hdr));
   dptp_hdr->magic = 0x0200;
-  dptp_hdr->type = DPTP_REQ;
-
+  dptp_hdr->type = DPTP_REQ;  
   /* Enable flag for hardware timestamping. */
-  dptp_req_pkt->ol_flags |= PKT_TX_IEEE1588_TMST;
+  dptp_data->dptp_req_pkt->ol_flags |= PKT_TX_IEEE1588_TMST;
+}
+
+static void send_dptp_request (struct dptp_data_ts *dptp_data)
+{
+  int wait_us, ret;
 
   /* Read value from NIC to prevent latching with old value. */
-
   rte_eth_timesync_read_tx_timestamp(dptp_data->portid, &dptp_data->txReqTs);
+  
+  rte_eth_timesync_read_time(dptp_data->portid, &dptp_data->txReqCallTs);
   /* Transmit the packet. */
-  rte_eth_tx_burst(dptp_data->portid, 0, &dptp_req_pkt, 1);
+  rte_eth_tx_burst(dptp_data->portid, 0, &dptp_data->dptp_req_pkt, 1);
   wait_us = 0;
   dptp_data->txReqTs.tv_nsec = 0;
   dptp_data->txReqTs.tv_sec = 0;
@@ -242,8 +253,8 @@ static void send_dptp_request(struct dptp_data_ts *dptp_data, struct rte_ether_a
     wait_us++;
   }
 
-  printf("Sent DPTP request packet, port=%d, txReqTs=%lu, err = %s\n",
-         dptp_data->portid, timespec64_to_ns(&dptp_data->txReqTs), rte_strerror(-ret));
+  // printf("Sent DPTP request packet, port=%d, txReqTs=%lu, err = %s\n",
+  //        dptp_data->portid, timespec64_to_ns(&dptp_data->txReqTs), rte_strerror(-ret));
 }
 
 /* This function processes DPTP packets
@@ -279,16 +290,14 @@ parse_dptp_frames(struct rte_mbuf *pkt, struct dptp_data_ts *dptp_data)
 }
 
 #define MAX_BURST 1000
-void run_dptp(struct dptp_data_ts *dptp_data, struct rte_ether_addr tor_switch, struct rte_mempool *mbuf_pool)
+void run_dptp(struct dptp_data_ts *dptp_data)
 {
   unsigned nb_rx;
   struct rte_mbuf *pkt;
   bool fop_received;
 
-  printf("---------------------------------------\n");
-  printf("DPTP - port %d\n", dptp_data->portid);
-  printf("---------------------------------------\n");
-  send_dptp_request(dptp_data, tor_switch, mbuf_pool);
+
+  send_dptp_request(dptp_data);
 
   while (!fop_received)
   {
@@ -332,18 +341,22 @@ __rte_noreturn void start_dptp(uint16_t ports, struct rte_ether_addr tor_switch,
   uint16_t portid;
   struct dptp_data_ts dptp_data[MAX_PORTS];
 
+  // Initialize the DPTP datastructure (ports, packets, etc)
   for (int i = 0; i < MAX_PORTS; i++)
   {
     memset(&dptp_data[i], '\0', sizeof(struct dptp_data_ts));
     dptp_data[i].portid = i;
     rte_eth_link_get(i, &dptp_data[i].portLinkRate);
+    init_dptp_request(&dptp_data[i], tor_switch, mbuf_pool);
   }
+  // An endless loop of DPTP requests across various ports.
+  // Ideally, this must be threaded, but to measure the error between ports, this is currently linear.
   while (1)
   {
     /* Read packet from RX queues. */
     for (portid = 0; portid < ports; portid++)
     {
-      run_dptp(&dptp_data[portid], tor_switch, mbuf_pool);
+      run_dptp(&dptp_data[portid]);
       usleep(1000);
     }
     dptp_eval(dptp_data, 0, 1);

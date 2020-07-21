@@ -43,7 +43,9 @@ struct dptp_header
 struct dptp_data_ts
 {
   uint16_t portid;
+  struct rte_mbuf *dptp_req_pkt;
   struct rte_mbuf *pkt;
+  struct timespec txReqCallTs;
   struct timespec txReqTs;
   struct timespec rxRespTs;
   struct timespec rxFopTs;
@@ -64,10 +66,10 @@ struct dptp_data_ts
   uint32_t nicDelta;
   uint32_t clientDelta;
   uint64_t nicTimeTs;
-  struct timeval kernel_adj;
+  int64_t kernel_delta;
 };
 
-void run_dptp(struct dptp_data_ts *dptp_data, struct rte_ether_addr tor_switch, struct rte_mempool *mbuf_pool);
+void run_dptp(struct dptp_data_ts *dptp_data);
 
 __rte_noreturn void start_dptp(uint16_t ports, struct rte_ether_addr tor_switch, struct rte_mempool *mbuf_pool);
 #endif
