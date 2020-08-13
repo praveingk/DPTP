@@ -113,6 +113,12 @@ Register<bit<32>, bit<32>>(1) dptp_now_lo;
 
 Register<bit<16>, bit<16>>(MAX_SWITCHES) timesyncs2s_igts_hi;
 
+
+
+Register<bit<32>, bit<32>>(1) ingress_timestamp_hi;
+
+Register<bit<32>, bit<32>>(1) ingress_timestamp_lo;
+
 control DptpNow (inout dptp_metadata_t dptp_meta, in ingress_intrinsic_metadata_from_parser_t ig_intr_md_from_parser_aux) {
     RegisterAction<bit<32>, bit<8>, bit<32>>(ts_hi) ts_hi_get = {
         void apply (inout bit<32> value, out bit<32> result) {  
@@ -126,15 +132,28 @@ control DptpNow (inout dptp_metadata_t dptp_meta, in ingress_intrinsic_metadata_
         }
     };
 
-    RegisterAction<bit<16>, bit<8>, bit<16>>(timesyncs2s_igts_hi) timesyncs2s_igts_hi_set = {
-        void apply(inout bit<16> value, out bit<16> result) {
-            value = (bit<16>)ig_intr_md_from_parser_aux.global_tstamp[47:32];
+    RegisterAction<bit<32>, bit<8>, bit<32>>(timesyncs2s_igts_hi) timesyncs2s_igts_hi_set = {
+        void apply(inout bit<32> value, out bit<32> result) {
+            value = (bit<32>)ig_intr_md_from_parser_aux.global_tstamp[47:32];
             result = value;
         }
     }; 
 
+    RegisterAction<bit<32>, bit<8>, bit<32>>(ingress_timestamp_hi) clip_ingress_timestamp_hi = {
+        void apply(inout bit<32> value, out bit<32> result) {
+            value = (bit<32>)ig_intr_md_from_parser_aux.global_tstamp[47:32];
+            result = value;
+        }
+    };  
+
+    RegisterAction<bit<32>, bit<8>, bit<32>>(ingress_timestamp_lo) clip_ingress_timestamp_lo = {
+        void apply(inout bit<32> value, out bit<32> result) {
+            value = (bit<32>)ig_intr_md_from_parser_aux.global_tstamp[31:0];
+            result = value;
+        }
+    };
     action timesyncs2s_capture_igTs_hi() {
-        dptp_meta.ingress_timestamp_clipped_hi = (bit<16>)timesyncs2s_igts_hi_set.execute(0);
+        dptp_meta.ingress_timestamp_clipped_hi = (bit<32>)timesyncs2s_igts_hi_set.execute(0);
     }
     action timesync_hi_request() {
         dptp_meta.reference_ts_hi = ts_hi_get.execute(dptp_meta.switch_id);
@@ -145,7 +164,7 @@ control DptpNow (inout dptp_metadata_t dptp_meta, in ingress_intrinsic_metadata_
     }
 
     action do_dptp_compare_residue() {
-        dptp_meta.dptp_overflow_compare = (dptp_meta.dptp_residue <= dptp_meta.ingress_timestamp_clipped ? dptp_meta.dptp_residue : dptp_meta.ingress_timestamp_clipped);
+        dptp_meta.dptp_overflow_compare = (dptp_meta.dptp_residue <= dptp_meta.ingress_timestamp_lo ? dptp_meta.dptp_residue : dptp_meta.ingress_timestamp_lo);
     }
 
     action do_dptp_handle_overflow () {
@@ -168,31 +187,72 @@ control DptpNow (inout dptp_metadata_t dptp_meta, in ingress_intrinsic_metadata_
         default_action = do_dptp_handle_overflow();
     }
 
+    action get_dptp_ts_hi () {
+        dptp_meta.dptp_ref[63:32] = ts_hi_get.execute(dptp_meta.switch_id);
+    }
+
+    action get_dptp_ts_lo () {
+        dptp_meta.dptp_ref[31:0] = ts_lo_get.execute(dptp_meta.switch_id);
+    }
+
+
+    Hash<bit<32>> (HashAlgorithm_t.IDENTITY)  ingress_hi_hash;
+
+    Hash<bit<32>> (HashAlgorithm_t.IDENTITY)  ingress_lo_hash;
+
+    action clip_igts_hi() {
+        dptp_meta.ingress_timestamp_hi = ingress_hi_hash.get({
+            ig_intr_md_from_parser_aux.global_tstamp[47:32]});
+    }
+
+    action clip_igts_lo() {
+        dptp_meta.ingress_timestamp_lo = ingress_lo_hash.get({
+            ig_intr_md_from_parser_aux.global_tstamp[31:0]});
+    }
+
+    // apply {
+        
+    //     /*
+    //         DPTP Current Time Calculation Logic : 
+    //         1) Slice the ingress timestamp to hi (16-bit) and lo (32-bit)
+    //         2) Get the reference_hi and lo from ts_hi and ts_lo registers.
+    //         3) Add reference_hi + ingress_hi, reference_lo + ingress_lo
+    //         4) Now, we need to check if reference_lo + ingress_lo had overflown and handle it.
+    //         5) To check overflow the logic is as follows:
+    //             a) residue = MAX_32BIT - reference_lo
+    //             b) overflow_compare = residue <= ingress_lo?: Overflow : no Overflow
+    //             c) Since, tofino1 does not support the above operation, we do the below :
+    //                 1) overflow_compare = residue <= ingress_lo?: residue : ingress_lo
+    //                 2) compare_residue = ingress_lo - overflow_compare
+    //                 3) if compare_residue == 0, then no overlow, else overflow
+    //     */            
+    //     //timesyncs2s_capture_igTs_hi();
+    //     clip_igts_hi();
+    //     clip_igts_lo();
+    //     timesync_hi_request();
+    //     timesync_request();        
+    //     dptp_meta.dptp_now_lo = dptp_meta.reference_ts_lo + dptp_meta.ingress_timestamp_lo;
+    //     dptp_meta.dptp_now_hi = dptp_meta.reference_ts_hi + (bit<32>)dptp_meta.ingress_timestamp_hi;
+    //     dptp_meta.dptp_residue = MAX_32BIT - dptp_meta.reference_ts_lo;
+    //     do_dptp_compare_residue();
+    //     dptp_meta.dptp_compare_residue = dptp_meta.ingress_timestamp_lo - dptp_meta.dptp_overflow_compare;
+    //     dptp_handle_overflow.apply();
+    // }
+
     apply {
         /*
-            DPTP Current Time Calculation Logic : 
-            1) Slice the ingress timestamp to hi (16-bit) and lo (32-bit)
-            2) Get the reference_hi and lo from ts_hi and ts_lo registers.
-            3) Add reference_hi + ingress_hi, reference_lo + ingress_lo
-            4) Now, we need to check if reference_lo + ingress_lo had overflown and handle it.
-            5) To check overflow the logic is as follows:
-                a) residue = MAX_32BIT - reference_lo
-                b) overflow_compare = residue <= ingress_lo?: Overflow : no Overflow
-                c) Since, tofino1 does not support the above operation, we do the below :
-                    1) overflow_compare = residue <= ingress_lo?: residue : ingress_lo
-                    2) compare_residue = ingress_lo - overflow_compare
-                    3) if compare_residue == 0, then no overlow, else overflow
-        */            
-        timesyncs2s_capture_igTs_hi();
-        dptp_meta.ingress_timestamp_clipped = (bit<32>)ig_intr_md_from_parser_aux.global_tstamp[31:0];
-        timesync_hi_request();
-        timesync_request();        
-        dptp_meta.dptp_now_lo = dptp_meta.reference_ts_lo + dptp_meta.ingress_timestamp_clipped;
-        dptp_meta.dptp_now_hi = dptp_meta.reference_ts_hi + (bit<32>)dptp_meta.ingress_timestamp_clipped_hi;
-        dptp_meta.dptp_residue = MAX_32BIT - dptp_meta.reference_ts_lo;
-        do_dptp_compare_residue();
-        dptp_meta.dptp_compare_residue = dptp_meta.ingress_timestamp_clipped - dptp_meta.dptp_overflow_compare;
-        dptp_handle_overflow.apply();
+            Optimized DPTP Current Time Calculation Logic : 
+            1) Read ts_hi and ts_lo register to dptp_ref register        
+            2) dptp_now = dptp_ref + ingress_ts
+        */
+        clip_igts_hi();
+        clip_igts_lo();
+        dptp_meta.ingress_timestamp = dptp_meta.ingress_timestamp_hi ++ dptp_meta.ingress_timestamp_lo;
+        get_dptp_ts_hi();   
+        get_dptp_ts_lo();
+        dptp_meta.dptp_now = (bit<64>)dptp_meta.dptp_ref + (bit<64>)dptp_meta.ingress_timestamp; 
+        dptp_meta.dptp_now_hi = dptp_meta.dptp_now[63:32];
+        dptp_meta.dptp_now_lo = dptp_meta.dptp_now[31:0];
     }
 }
 
@@ -247,7 +307,7 @@ control DptpRespStore (inout dptp_t dptp_hdr, inout dptp_metadata_t dptp_meta) {
     
     action dptp_store_reference_lo () {
         dptp_respnow_lo_set.execute(dptp_meta.switch_id);
-    }LOGICAL_SWITCHES
+    }
     
     apply {
         /*

@@ -83,8 +83,8 @@ control DptpIngressDeparser (in bit<48> ethernet_dstAddr,
                                         dptp.igts[31:0],
                                         dptp.igmacts[31:0],
                                         dptp.egts[31:0],
-                                        dptp_meta.ingress_timestamp_clipped_hi,
-                                        dptp_meta.ingress_timestamp_clipped,
+                                        dptp_meta.ingress_timestamp_hi[15:0],
+                                        dptp_meta.ingress_timestamp_lo,
                                         dptp_meta.mac_timestamp_clipped});
         }
         if (ig_intr_md_for_dprsr.digest_type == DPTP_REPLY_FOLLOWUP_DIGEST_TYPE) {

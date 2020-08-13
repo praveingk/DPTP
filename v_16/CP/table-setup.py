@@ -26,7 +26,7 @@ def setup_virt_tofino2 ():
 def setup_tofino2 ():
     dptpSwitchIngress = bfrt.dptp_simple_switch.pipe.SwitchIngress
 
-    dptpSwitchIngress.dptp_now.dptp_handle_overflow.add_with_nop(dptp_compare_residue=0)
+    #dptpSwitchIngress.dptp_now.dptp_handle_overflow.add_with_nop(dptp_compare_residue=0)
 
     # Tina
     dptpSwitchIngress.mac_forward.add_with_set_egr(dstaddr=0x6cb3115309b0, egress_spec=128)
