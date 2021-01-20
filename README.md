@@ -3,7 +3,7 @@
 This source code synchronizes the network consisting of programmable (Barefoot Tofino) switches and IEEE1588 PTP-compatible NICs to support the global timing (64-bit) in the network data-plane (Switch and NICs). 
 Once DPTP is running, packets can have a global timing context, which is useful for several applications like latency tracking, monitoring, updates, ordering of events, distributed applications, etc.
 
-Paper Link :point_right:	 https://www.comp.nus.edu.sg/~pravein/papers/DPTP_SOSR19.pdf
+Paper Link :point_right:	 https://dl.acm.org/doi/10.1145/3314148.3314353?cid=82658740957
 
 ## Source Code Pointers
 
